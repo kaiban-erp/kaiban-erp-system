@@ -1,12 +1,16 @@
 // ==============================
 // KaiBan ERP｜app.js
-// 資料來源：Google Sheet 商品主檔 CSV
+// 資料來源：Google Sheet 商品主檔 + 採購紀錄 CSV
 // ==============================
 
-const SHEET_CSV_URL =
+const PRODUCT_CSV_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vS6DeEloMgCjxhelHhJ53nBuz6ROEX13csDEZubiVkiz0Migol87Av33UT--i7r7ovTG8pxCkFVw_vo/pub?output=csv";
 
+const PURCHASE_CSV_URL =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vS6DeEloMgCjxhelHhJ53nBuz6ROEX13csDEZubiVkiz0Migol87Av33UT--i7r7ovTG8pxCkFVw_vo/pub?gid=1520549665&single=true&output=csv";
+
 let products = [];
+let purchases = [];
 
 const $ = (id) => document.getElementById(id);
 
@@ -20,19 +24,11 @@ const norm = (value) =>
     .toLowerCase()
     .replace(/\s+/g, "");
 
-// ==============================
-// 初始化
-// ==============================
-
 document.addEventListener("DOMContentLoaded", () => {
   setupNavigation();
   setupSearch();
-  loadProducts();
+  loadData();
 });
-
-// ==============================
-// 導覽切換
-// ==============================
 
 function setupNavigation() {
   document.querySelectorAll(".nav").forEach((button) => {
@@ -57,26 +53,22 @@ function setupSearch() {
   if (input) input.addEventListener("input", render);
 }
 
-// ==============================
-// 讀取 Google Sheet
-// ==============================
-
-async function loadProducts() {
+async function loadData() {
   showLoading();
 
   try {
-    const response = await fetch(SHEET_CSV_URL + "&t=" + Date.now());
+    const [productText, purchaseText] = await Promise.all([
+      fetchCSV(PRODUCT_CSV_URL),
+      fetchCSV(PURCHASE_CSV_URL),
+    ]);
 
-    if (!response.ok) {
-      throw new Error("Google Sheet 讀取失敗：" + response.status);
-    }
-
-    const buffer = await response.arrayBuffer();
-    const text = new TextDecoder("utf-8").decode(buffer);
-
-    products = parseCSV(text)
+    products = parseCSV(productText)
       .filter((row) => row["品項"])
       .map(normalizeProduct);
+
+    purchases = parseCSV(purchaseText)
+      .filter((row) => row["品項"])
+      .map(normalizePurchase);
 
     render();
   } catch (error) {
@@ -85,10 +77,16 @@ async function loadProducts() {
   }
 }
 
-// ==============================
-// CSV 解析
-// 支援逗號、換行、雙引號
-// ==============================
+async function fetchCSV(url) {
+  const response = await fetch(url + "&t=" + Date.now());
+
+  if (!response.ok) {
+    throw new Error("CSV 讀取失敗：" + response.status);
+  }
+
+  const buffer = await response.arrayBuffer();
+  return new TextDecoder("utf-8").decode(buffer);
+}
 
 function parseCSV(text) {
   const rows = [];
@@ -145,10 +143,6 @@ function parseCSV(text) {
   });
 }
 
-// ==============================
-// 統一商品資料格式
-// ==============================
-
 function normalizeProduct(row) {
   return {
     code: row["ERP代碼"] || "",
@@ -164,9 +158,23 @@ function normalizeProduct(row) {
   };
 }
 
-// ==============================
-// 搜尋
-// ==============================
+function normalizePurchase(row) {
+  const qty = Number(row["數量"] || 0);
+  const price = Number(row["單價"] || 0);
+  const amount = Number(row["金額"] || qty * price || 0);
+
+  return {
+    date: row["日期"] || "",
+    supplier: row["供應商"] || "未填供應商",
+    name: row["品項"] || "",
+    spec: row["規格"] || "",
+    qty,
+    unit: row["單位"] || "",
+    price,
+    amount,
+    note: row["備註"] || "",
+  };
+}
 
 function getFilteredProducts() {
   const keyword = norm($("globalSearch")?.value || "");
@@ -190,36 +198,49 @@ function getFilteredProducts() {
   });
 }
 
-// ==============================
-// 畫面渲染
-// ==============================
+function getFilteredPurchases() {
+  const keyword = norm($("globalSearch")?.value || "");
 
-function render() {
-  const list = getFilteredProducts();
+  return purchases.filter((purchase) => {
+    const searchText = [
+      purchase.date,
+      purchase.supplier,
+      purchase.name,
+      purchase.spec,
+      purchase.qty,
+      purchase.unit,
+      purchase.price,
+      purchase.amount,
+      purchase.note,
+    ].join(" ");
 
-  renderDashboard();
-  renderProductCards(list);
-  renderPurchaseRows(list);
-  renderSuppliers();
+    return !keyword || norm(searchText).includes(keyword);
+  });
 }
 
-// ==============================
-// Dashboard
-// ==============================
+function render() {
+  const productList = getFilteredProducts();
+  const purchaseList = getFilteredPurchases();
+
+  renderDashboard();
+  renderProductCards(productList);
+  renderPurchaseRows(purchaseList);
+  renderSuppliers();
+}
 
 function renderDashboard() {
   const activeProducts = products.filter((p) => p.active !== "FALSE");
   const suppliers = new Set(activeProducts.map((p) => p.supplier));
-  const totalPrice = activeProducts.reduce((sum, p) => sum + p.price, 0);
+  const purchaseTotal = purchases.reduce((sum, p) => sum + p.amount, 0);
 
-  if ($("statRows")) $("statRows").textContent = activeProducts.length;
+  if ($("statRows")) $("statRows").textContent = purchases.length;
   if ($("statFoods")) $("statFoods").textContent = activeProducts.length;
   if ($("statSuppliers")) $("statSuppliers").textContent = suppliers.size;
-  if ($("statTotal")) $("statTotal").textContent = money(totalPrice);
+  if ($("statTotal")) $("statTotal").textContent = money(purchaseTotal);
 
-  const recent = [...activeProducts]
-    .filter((p) => p.lastDate)
-    .sort((a, b) => String(b.lastDate).localeCompare(String(a.lastDate)))
+  const recent = [...purchases]
+    .filter((p) => p.date)
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)))
     .slice(0, 8);
 
   if ($("recentList")) {
@@ -230,22 +251,18 @@ function renderDashboard() {
           <div class="item">
             <div>
               <strong>${escapeHTML(p.name)}</strong><br>
-              <span class="muted">${escapeHTML(p.lastDate)}｜${escapeHTML(p.supplier)}</span>
+              <span class="muted">${escapeHTML(p.date)}｜${escapeHTML(p.supplier)}</span>
             </div>
             <div>
-              <strong>${money(p.price)}</strong><br>
-              <span class="muted">${escapeHTML(p.unit || "")}</span>
+              <strong>${money(p.amount)}</strong><br>
+              <span class="muted">${p.qty} ${escapeHTML(p.unit || "")} × ${money(p.price)}</span>
             </div>
           </div>
         `
         )
-        .join("") || `<div class="item">尚無資料</div>`;
+        .join("") || `<div class="item">尚無採購資料</div>`;
   }
 }
-
-// ==============================
-// 食材卡片
-// ==============================
 
 function renderProductCards(list) {
   const container = $("foodCards");
@@ -279,33 +296,29 @@ function renderProductCards(list) {
     .join("");
 }
 
-// ==============================
-// 採購紀錄區
-// 目前先用商品主檔呈現最新採購資料
-// 之後會改讀「採購紀錄」工作表
-// ==============================
-
 function renderPurchaseRows(list) {
   const tbody = $("purchaseRows");
   if (!tbody) return;
 
   if (!list.length) {
-    tbody.innerHTML = `<tr><td colspan="9">尚無資料</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9">尚無採購資料</td></tr>`;
     return;
   }
 
-  tbody.innerHTML = list
+  const sorted = [...list].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+
+  tbody.innerHTML = sorted
     .map(
       (p) => `
       <tr>
-        <td>${escapeHTML(p.lastDate || "")}</td>
+        <td>${escapeHTML(p.date || "")}</td>
         <td>${escapeHTML(p.supplier)}</td>
         <td><strong>${escapeHTML(p.name)}</strong></td>
-        <td>${escapeHTML(p.category)}</td>
+        <td></td>
         <td>${escapeHTML(p.spec || "")}</td>
-        <td>—</td>
+        <td>${p.qty} ${escapeHTML(p.unit || "")}</td>
         <td>${money(p.price)}</td>
-        <td>—</td>
+        <td>${money(p.amount)}</td>
         <td>${escapeHTML(p.note || "")}</td>
       </tr>
     `
@@ -313,34 +326,28 @@ function renderPurchaseRows(list) {
     .join("");
 }
 
-// ==============================
-// 供應商統計
-// ==============================
-
 function renderSuppliers() {
   const container = $("supplierCards");
   if (!container) return;
 
   const map = {};
 
-  products
-    .filter((p) => p.active !== "FALSE")
-    .forEach((p) => {
-      if (!map[p.supplier]) {
-        map[p.supplier] = {
-          name: p.supplier,
-          count: 0,
-          total: 0,
-          categories: new Set(),
-        };
-      }
+  purchases.forEach((p) => {
+    if (!map[p.supplier]) {
+      map[p.supplier] = {
+        name: p.supplier,
+        count: 0,
+        total: 0,
+        items: new Set(),
+      };
+    }
 
-      map[p.supplier].count += 1;
-      map[p.supplier].total += p.price;
-      map[p.supplier].categories.add(p.category);
-    });
+    map[p.supplier].count += 1;
+    map[p.supplier].total += p.amount;
+    map[p.supplier].items.add(p.name);
+  });
 
-  const suppliers = Object.values(map).sort((a, b) => b.count - a.count);
+  const suppliers = Object.values(map).sort((a, b) => b.total - a.total);
 
   if (!suppliers.length) {
     container.innerHTML = `<div class="foodCard">尚無供應商資料</div>`;
@@ -353,10 +360,10 @@ function renderSuppliers() {
       <article class="foodCard">
         <span class="tag">供應商</span>
         <h3>${escapeHTML(supplier.name)}</h3>
-        <div class="price">${supplier.count} 項</div>
+        <div class="price">${money(supplier.total)}</div>
         <div class="meta">
-          <div class="label">價格合計</div><div>${money(supplier.total)}</div>
-          <div class="label">分類數</div><div>${supplier.categories.size}</div>
+          <div class="label">採購筆數</div><div>${supplier.count}</div>
+          <div class="label">品項數</div><div>${supplier.items.size}</div>
         </div>
       </article>
     `
@@ -364,29 +371,15 @@ function renderSuppliers() {
     .join("");
 }
 
-// ==============================
-// 狀態顯示
-// ==============================
-
 function showLoading() {
-  if ($("foodCards")) {
-    $("foodCards").innerHTML = `<div class="foodCard">資料載入中…</div>`;
-  }
+  if ($("foodCards")) $("foodCards").innerHTML = `<div class="foodCard">商品資料載入中…</div>`;
+  if ($("recentList")) $("recentList").innerHTML = `<div class="item">採購資料載入中…</div>`;
 }
 
 function showError(message) {
-  if ($("foodCards")) {
-    $("foodCards").innerHTML = `<div class="foodCard">${escapeHTML(message)}</div>`;
-  }
-
-  if ($("recentList")) {
-    $("recentList").innerHTML = `<div class="item">${escapeHTML(message)}</div>`;
-  }
+  if ($("foodCards")) $("foodCards").innerHTML = `<div class="foodCard">${escapeHTML(message)}</div>`;
+  if ($("recentList")) $("recentList").innerHTML = `<div class="item">${escapeHTML(message)}</div>`;
 }
-
-// ==============================
-// 安全輸出
-// ==============================
 
 function escapeHTML(value) {
   return String(value || "")
