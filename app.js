@@ -203,7 +203,7 @@ function setupPhotoEntry() {
 async function compressReceiptImage(file) {
   const dataUrl = await readFileAsDataUrl(file);
   const image = await loadImage(dataUrl);
-  const maxSide = 1600;
+  const maxSide = 1280;
   const scale = Math.min(1, maxSide / Math.max(image.naturalWidth || image.width, image.naturalHeight || image.height));
   const width = Math.max(1, Math.round((image.naturalWidth || image.width) * scale));
   const height = Math.max(1, Math.round((image.naturalHeight || image.height) * scale));
@@ -214,7 +214,7 @@ async function compressReceiptImage(file) {
   context.fillStyle = "#fff";
   context.fillRect(0, 0, width, height);
   context.drawImage(image, 0, 0, width, height);
-  const outputDataUrl = canvas.toDataURL("image/jpeg", 0.82);
+  const outputDataUrl = canvas.toDataURL("image/jpeg", 0.72);
   const base64 = outputDataUrl.split(",")[1] || "";
   return {
     dataUrl: outputDataUrl,
@@ -255,7 +255,7 @@ async function analyzeReceiptPhoto() {
 
   const buttons = [$("analyzeReceipt"), $("reanalyzeReceipt")];
   buttons.forEach((button) => { button.disabled = true; });
-  setReceiptStatus("AI 正在辨識，通常需要 10～40 秒…", "loading");
+  setReceiptStatus("AI 正在快速辨識，通常需要 5～20 秒…", "loading");
 
   try {
     const requestId = `receipt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
