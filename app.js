@@ -1,52 +1,102 @@
+// ==============================
+// KaiBan ERP｜app.js
+// 資料來源：Google Sheet 商品主檔 CSV
+// ==============================
+
 const SHEET_CSV_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vS6DeEloMgCjxhelHhJ53nBuz6ROEX13csDEZubiVkiz0Migol87Av33UT--i7r7ovTG8pxCkFVw_vo/pub?output=csv";
 
 let products = [];
 
 const $ = (id) => document.getElementById(id);
-const money = (n) => "$" + Number(n || 0).toLocaleString("zh-TW", { maximumFractionDigits: 2 });
-const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, "");
 
-document.querySelectorAll(".nav").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".nav").forEach((b) => b.classList.remove("active"));
-    document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
+const money = (value) => {
+  const number = Number(value || 0);
+  return "$" + number.toLocaleString("zh-TW", { maximumFractionDigits: 2 });
+};
 
-    btn.classList.add("active");
-    const view = btn.dataset.view;
-    $(view)?.classList.add("active");
+const norm = (value) =>
+  String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, "");
 
-    if ($("pageTitle")) {
-      $("pageTitle").textContent = btn.textContent.replace(/[📊🔍📦🏪]/g, "").trim();
-    }
-  });
+// ==============================
+// 初始化
+// ==============================
+
+document.addEventListener("DOMContentLoaded", () => {
+  setupNavigation();
+  setupSearch();
+  loadProducts();
 });
 
-$("globalSearch")?.addEventListener("input", render);
+// ==============================
+// 導覽切換
+// ==============================
+
+function setupNavigation() {
+  document.querySelectorAll(".nav").forEach((button) => {
+    button.addEventListener("click", () => {
+      document.querySelectorAll(".nav").forEach((b) => b.classList.remove("active"));
+      document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
+
+      button.classList.add("active");
+
+      const viewId = button.dataset.view;
+      const view = $(viewId);
+      if (view) view.classList.add("active");
+
+      const title = button.textContent.replace(/[📊🔍📦🏪]/g, "").trim();
+      if ($("pageTitle")) $("pageTitle").textContent = title;
+    });
+  });
+}
+
+function setupSearch() {
+  const input = $("globalSearch");
+  if (input) input.addEventListener("input", render);
+}
+
+// ==============================
+// 讀取 Google Sheet
+// ==============================
 
 async function loadProducts() {
+  showLoading();
+
   try {
-    const res = await fetch(SHEET_CSV_URL + "&t=" + Date.now());
-    const text = await res.text();
+    const response = await fetch(SHEET_CSV_URL + "&t=" + Date.now());
+
+    if (!response.ok) {
+      throw new Error("Google Sheet 讀取失敗：" + response.status);
+    }
+
+    const buffer = await response.arrayBuffer();
+    const text = new TextDecoder("utf-8").decode(buffer);
 
     products = parseCSV(text)
-      .filter((p) => p["品項"])
+      .filter((row) => row["品項"])
       .map(normalizeProduct);
 
     render();
   } catch (error) {
-    console.error(error);
-    if ($("foodCards")) {
-      $("foodCards").innerHTML = `<div class="foodCard">資料讀取失敗，請確認 Google Sheet 已發布成 CSV。</div>`;
-    }
+    console.error("KaiBan ERP load error:", error);
+    showError("資料讀取失敗，請確認 Google Sheet 已發布成 CSV。");
   }
 }
+
+// ==============================
+// CSV 解析
+// 支援逗號、換行、雙引號
+// ==============================
 
 function parseCSV(text) {
   const rows = [];
   let row = [];
   let cell = "";
   let inQuotes = false;
+
+  text = text.replace(/^\uFEFF/, "");
 
   for (let i = 0; i < text.length; i++) {
     const char = text[i];
@@ -61,7 +111,7 @@ function parseCSV(text) {
       row.push(cell);
       cell = "";
     } else if ((char === "\n" || char === "\r") && !inQuotes) {
-      if (cell || row.length) {
+      if (cell !== "" || row.length) {
         row.push(cell);
         rows.push(row);
         row = [];
@@ -73,75 +123,101 @@ function parseCSV(text) {
     }
   }
 
-  if (cell || row.length) {
+  if (cell !== "" || row.length) {
     row.push(cell);
     rows.push(row);
   }
 
-  const headers = rows[0].map((h) => h.trim());
+  if (!rows.length) return [];
 
-  return rows.slice(1).map((r) => {
+  const headers = rows[0].map((header) =>
+    String(header || "")
+      .replace(/^\uFEFF/, "")
+      .trim()
+  );
+
+  return rows.slice(1).map((values) => {
     const item = {};
-    headers.forEach((h, i) => {
-      item[h] = (r[i] || "").trim();
+    headers.forEach((header, index) => {
+      item[header] = String(values[index] || "").trim();
     });
     return item;
   });
 }
 
-function normalizeProduct(p) {
+// ==============================
+// 統一商品資料格式
+// ==============================
+
+function normalizeProduct(row) {
   return {
-    code: p["ERP代碼"] || "",
-    name: p["品項"] || "",
-    category: p["分類"] || "未分類",
-    spec: p["規格"] || "",
-    unit: p["單位"] || "",
-    price: Number(p["最新單價"] || 0),
-    supplier: p["供應商"] || "未填供應商",
-    lastDate: p["最近採購日"] || "",
-    active: String(p["使用中"] || "TRUE").toUpperCase(),
-    note: p["備註"] || "",
+    code: row["ERP代碼"] || "",
+    name: row["品項"] || "",
+    category: row["分類"] || "未分類",
+    spec: row["規格"] || "",
+    unit: row["單位"] || "",
+    price: Number(row["最新單價"] || 0),
+    supplier: row["供應商"] || "未填供應商",
+    lastDate: row["最近採購日"] || "",
+    active: String(row["使用中"] || "TRUE").toUpperCase(),
+    note: row["備註"] || "",
   };
 }
 
-function filteredProducts() {
-  const q = norm($("globalSearch")?.value || "");
+// ==============================
+// 搜尋
+// ==============================
 
-  return products.filter((p) => {
-    if (p.active === "FALSE") return false;
+function getFilteredProducts() {
+  const keyword = norm($("globalSearch")?.value || "");
+
+  return products.filter((product) => {
+    if (product.active === "FALSE") return false;
 
     const searchText = [
-      p.code,
-      p.name,
-      p.category,
-      p.spec,
-      p.unit,
-      p.price,
-      p.supplier,
-      p.lastDate,
-      p.note,
+      product.code,
+      product.name,
+      product.category,
+      product.spec,
+      product.unit,
+      product.price,
+      product.supplier,
+      product.lastDate,
+      product.note,
     ].join(" ");
 
-    return !q || norm(searchText).includes(q);
+    return !keyword || norm(searchText).includes(keyword);
   });
 }
 
+// ==============================
+// 畫面渲染
+// ==============================
+
 function render() {
-  const list = filteredProducts();
+  const list = getFilteredProducts();
 
   renderDashboard();
-  renderFoodCards(list);
+  renderProductCards(list);
   renderPurchaseRows(list);
   renderSuppliers();
 }
 
-function renderDashboard() {
-  if ($("statRows")) $("statRows").textContent = products.length;
-  if ($("statFoods")) $("statFoods").textContent = products.filter((p) => p.active !== "FALSE").length;
-  if ($("statSuppliers")) $("statSuppliers").textContent = new Set(products.map((p) => p.supplier)).size;
-  if ($("statTotal")) $("statTotal").textContent = money(products.reduce((sum, p) => sum + p.price, 0));
+// ==============================
+// Dashboard
+// ==============================
 
-  const recent = [...products]
+function renderDashboard() {
+  const activeProducts = products.filter((p) => p.active !== "FALSE");
+  const suppliers = new Set(activeProducts.map((p) => p.supplier));
+  const totalPrice = activeProducts.reduce((sum, p) => sum + p.price, 0);
+
+  if ($("statRows")) $("statRows").textContent = activeProducts.length;
+  if ($("statFoods")) $("statFoods").textContent = activeProducts.length;
+  if ($("statSuppliers")) $("statSuppliers").textContent = suppliers.size;
+  if ($("statTotal")) $("statTotal").textContent = money(totalPrice);
+
+  const recent = [...activeProducts]
     .filter((p) => p.lastDate)
     .sort((a, b) => String(b.lastDate).localeCompare(String(a.lastDate)))
     .slice(0, 8);
@@ -153,12 +229,12 @@ function renderDashboard() {
           (p) => `
           <div class="item">
             <div>
-              <strong>${p.name}</strong><br>
-              <span class="muted">${p.lastDate}｜${p.supplier}</span>
+              <strong>${escapeHTML(p.name)}</strong><br>
+              <span class="muted">${escapeHTML(p.lastDate)}｜${escapeHTML(p.supplier)}</span>
             </div>
             <div>
               <strong>${money(p.price)}</strong><br>
-              <span class="muted">${p.unit || ""}</span>
+              <span class="muted">${escapeHTML(p.unit || "")}</span>
             </div>
           </div>
         `
@@ -167,27 +243,35 @@ function renderDashboard() {
   }
 }
 
-function renderFoodCards(list) {
-  if (!$("foodCards")) return;
+// ==============================
+// 食材卡片
+// ==============================
+
+function renderProductCards(list) {
+  const container = $("foodCards");
+  if (!container) return;
 
   if (!list.length) {
-    $("foodCards").innerHTML = `<div class="foodCard">找不到商品</div>`;
+    container.innerHTML = `<div class="foodCard">找不到商品</div>`;
     return;
   }
 
-  $("foodCards").innerHTML = list
+  container.innerHTML = list
     .map(
       (p) => `
       <article class="foodCard">
-        <span class="tag">${p.category}</span>
-        <span class="tag">${p.supplier}</span>
-        <h3>${p.name}</h3>
-        <div class="price">${money(p.price)} / ${p.unit || "單位"}</div>
+        <span class="tag">${escapeHTML(p.category)}</span>
+        <span class="tag">${escapeHTML(p.supplier)}</span>
+
+        <h3>${escapeHTML(p.name)}</h3>
+
+        <div class="price">${money(p.price)} / ${escapeHTML(p.unit || "單位")}</div>
+
         <div class="meta">
-          <div class="label">ERP代碼</div><div>${p.code || "—"}</div>
-          <div class="label">規格</div><div>${p.spec || "—"}</div>
-          <div class="label">最近採購</div><div>${p.lastDate || "—"}</div>
-          <div class="label">備註</div><div>${p.note || "—"}</div>
+          <div class="label">ERP代碼</div><div>${escapeHTML(p.code || "—")}</div>
+          <div class="label">規格</div><div>${escapeHTML(p.spec || "—")}</div>
+          <div class="label">最近採購</div><div>${escapeHTML(p.lastDate || "—")}</div>
+          <div class="label">備註</div><div>${escapeHTML(p.note || "—")}</div>
         </div>
       </article>
     `
@@ -195,67 +279,120 @@ function renderFoodCards(list) {
     .join("");
 }
 
-function renderPurchaseRows(list) {
-  if (!$("purchaseRows")) return;
+// ==============================
+// 採購紀錄區
+// 目前先用商品主檔呈現最新採購資料
+// 之後會改讀「採購紀錄」工作表
+// ==============================
 
-  $("purchaseRows").innerHTML =
-    list
-      .map(
-        (p) => `
-        <tr>
-          <td>${p.lastDate || ""}</td>
-          <td>${p.supplier}</td>
-          <td><strong>${p.name}</strong></td>
-          <td>${p.category}</td>
-          <td>${p.spec || ""}</td>
-          <td>—</td>
-          <td>${money(p.price)}</td>
-          <td>—</td>
-          <td>${p.note || ""}</td>
-        </tr>
-      `
-      )
-      .join("") || `<tr><td colspan="9">尚無資料</td></tr>`;
+function renderPurchaseRows(list) {
+  const tbody = $("purchaseRows");
+  if (!tbody) return;
+
+  if (!list.length) {
+    tbody.innerHTML = `<tr><td colspan="9">尚無資料</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = list
+    .map(
+      (p) => `
+      <tr>
+        <td>${escapeHTML(p.lastDate || "")}</td>
+        <td>${escapeHTML(p.supplier)}</td>
+        <td><strong>${escapeHTML(p.name)}</strong></td>
+        <td>${escapeHTML(p.category)}</td>
+        <td>${escapeHTML(p.spec || "")}</td>
+        <td>—</td>
+        <td>${money(p.price)}</td>
+        <td>—</td>
+        <td>${escapeHTML(p.note || "")}</td>
+      </tr>
+    `
+    )
+    .join("");
 }
 
+// ==============================
+// 供應商統計
+// ==============================
+
 function renderSuppliers() {
-  if (!$("supplierCards")) return;
+  const container = $("supplierCards");
+  if (!container) return;
 
   const map = {};
 
-  products.forEach((p) => {
-    if (!map[p.supplier]) {
-      map[p.supplier] = {
-        name: p.supplier,
-        count: 0,
-        total: 0,
-        categories: new Set(),
-      };
-    }
+  products
+    .filter((p) => p.active !== "FALSE")
+    .forEach((p) => {
+      if (!map[p.supplier]) {
+        map[p.supplier] = {
+          name: p.supplier,
+          count: 0,
+          total: 0,
+          categories: new Set(),
+        };
+      }
 
-    map[p.supplier].count += 1;
-    map[p.supplier].total += p.price;
-    map[p.supplier].categories.add(p.category);
-  });
+      map[p.supplier].count += 1;
+      map[p.supplier].total += p.price;
+      map[p.supplier].categories.add(p.category);
+    });
 
   const suppliers = Object.values(map).sort((a, b) => b.count - a.count);
 
-  $("supplierCards").innerHTML =
-    suppliers
-      .map(
-        (s) => `
-        <article class="foodCard">
-          <span class="tag">供應商</span>
-          <h3>${s.name}</h3>
-          <div class="price">${s.count} 項</div>
-          <div class="meta">
-            <div class="label">價格合計</div><div>${money(s.total)}</div>
-            <div class="label">分類數</div><div>${s.categories.size}</div>
-          </div>
-        </article>
-      `
-      )
-      .join("") || `<div class="foodCard">尚無供應商資料</div>`;
+  if (!suppliers.length) {
+    container.innerHTML = `<div class="foodCard">尚無供應商資料</div>`;
+    return;
+  }
+
+  container.innerHTML = suppliers
+    .map(
+      (supplier) => `
+      <article class="foodCard">
+        <span class="tag">供應商</span>
+        <h3>${escapeHTML(supplier.name)}</h3>
+        <div class="price">${supplier.count} 項</div>
+        <div class="meta">
+          <div class="label">價格合計</div><div>${money(supplier.total)}</div>
+          <div class="label">分類數</div><div>${supplier.categories.size}</div>
+        </div>
+      </article>
+    `
+    )
+    .join("");
 }
 
-loadProducts();
+// ==============================
+// 狀態顯示
+// ==============================
+
+function showLoading() {
+  if ($("foodCards")) {
+    $("foodCards").innerHTML = `<div class="foodCard">資料載入中…</div>`;
+  }
+}
+
+function showError(message) {
+  if ($("foodCards")) {
+    $("foodCards").innerHTML = `<div class="foodCard">${escapeHTML(message)}</div>`;
+  }
+
+  if ($("recentList")) {
+    $("recentList").innerHTML = `<div class="item">${escapeHTML(message)}</div>`;
+  }
+}
+
+// ==============================
+// 安全輸出
+// ==============================
+
+function escapeHTML(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
