@@ -22,6 +22,7 @@
       <button class="nav" data-view="foods" data-title="食材搜尋">食材搜尋</button>
       <button class="nav" data-view="purchases" data-title="採購紀錄">採購紀錄</button>
       <button class="nav" data-view="monthly" data-title="每月支出">每月支出</button>
+      <button class="nav navPhoto" data-view="photoEntry" data-title="拍照建檔">拍照建檔</button>
       <button class="nav navAccent" data-view="quickEntry" data-title="快速建立資料庫">快速建立資料庫</button>
       <button class="nav" data-view="suppliers" data-title="供應商">供應商</button>
     </nav>
@@ -201,6 +202,110 @@
             </thead>
             <tbody id="monthRows"></tbody>
           </table>
+        </div>
+      </div>
+    </section>
+
+
+    <section id="photoEntry" class="view">
+      <div class="quickIntro photoIntro">
+        <div>
+          <span class="eyebrow">AI 拍照建檔</span>
+          <h2>拍一張照片，自動拆出採購明細</h2>
+          <p>支援收據、發票、採購單與手寫單據；辨識後可先修改，再加入待送清單。</p>
+        </div>
+        <div id="photoApiBadge" class="apiBadge">尚未連接 AI 辨識接口</div>
+      </div>
+
+      <div class="photoGrid">
+        <div class="panel photoUploadPanel">
+          <div class="panelHead">
+            <div>
+              <h2>1. 拍照或上傳</h2>
+              <p class="muted">請保持照片清楚、完整，避免反光與裁切。</p>
+            </div>
+          </div>
+
+          <label class="photoDrop" for="receiptFile">
+            <input id="receiptFile" type="file" accept="image/*" capture="environment" hidden>
+            <span class="photoDropIcon">📷</span>
+            <strong>點這裡拍照或選擇照片</strong>
+            <span>JPG、PNG、HEIC（瀏覽器支援時）</span>
+          </label>
+
+          <div id="receiptPreviewWrap" class="receiptPreviewWrap" hidden>
+            <img id="receiptPreview" alt="單據照片預覽">
+            <div class="previewMeta">
+              <span id="receiptFileName"></span>
+              <span id="receiptFileSize"></span>
+            </div>
+          </div>
+
+          <div class="formActions photoActions">
+            <button id="analyzeReceipt" class="button primary" type="button" disabled>AI 辨識照片</button>
+            <button id="clearReceipt" class="button ghost" type="button" disabled>清除照片</button>
+          </div>
+          <p id="receiptAnalyzeStatus" class="photoStatus muted">尚未選擇照片</p>
+        </div>
+
+        <div class="panel photoResultPanel">
+          <div class="panelHead">
+            <div>
+              <h2>2. 確認辨識結果</h2>
+              <p class="muted">每個欄位都能修改，確認後再加入待送清單。</p>
+            </div>
+          </div>
+
+          <div id="receiptResultEmpty" class="empty photoEmpty">
+            上傳照片並完成 AI 辨識後，明細會顯示在這裡。
+          </div>
+
+          <div id="receiptResult" hidden>
+            <div class="receiptHeaderFields">
+              <label>
+                <span>日期 *</span>
+                <input id="receiptDate" type="date">
+              </label>
+              <label>
+                <span>供應商 *</span>
+                <input id="receiptSupplier" type="text" list="supplierOptions" placeholder="供應商或店家名稱">
+              </label>
+              <div class="receiptTotalBox">
+                <span>單據總額</span>
+                <strong id="receiptTotal">$0</strong>
+              </div>
+            </div>
+
+            <div class="receiptInfoLine">
+              <span id="receiptDocumentType" class="tag">單據</span>
+              <span id="receiptInvoiceNumber" class="muted"></span>
+              <span id="receiptNote" class="muted"></span>
+            </div>
+
+            <div class="tableWrap receiptTableWrap">
+              <table class="receiptTable">
+                <thead>
+                  <tr>
+                    <th>品項 *</th>
+                    <th>分類</th>
+                    <th>規格</th>
+                    <th>數量</th>
+                    <th>單位</th>
+                    <th>單價</th>
+                    <th>金額</th>
+                    <th>信心</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="receiptRows"></tbody>
+              </table>
+            </div>
+
+            <div class="formActions receiptResultActions">
+              <button id="addReceiptToStaged" class="button primary" type="button">加入待送清單</button>
+              <button id="reanalyzeReceipt" class="button secondary" type="button">重新辨識</button>
+            </div>
+          </div>
         </div>
       </div>
     </section>

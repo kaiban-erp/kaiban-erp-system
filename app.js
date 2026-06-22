@@ -20,12 +20,15 @@ let purchases = [];
 let stagedRecords = loadStagedRecords();
 let selectedMonth = "";
 let amountWasEdited = false;
+let receiptImagePayload = null;
+let receiptAnalysis = null;
 
 const pageDescriptions = {
   dashboard: "採購、食材、供應商與每月支出集中管理。",
   foods: "搜尋品項並比較歷史價格。",
   purchases: "查看所有採購明細與匯出資料。",
   monthly: "依月份分析總支出、供應商與品項分類。",
+  photoEntry: "拍照辨識收據、發票或採購單，確認後快速建檔。",
   quickEntry: "逐筆輸入或批次貼上，快速累積採購資料庫。",
   suppliers: "查看各供應商累計採購金額與品項數。",
 };
@@ -61,6 +64,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupSearch();
   setupMonthly();
   setupQuickEntry();
+  setupPhotoEntry();
   setupExports();
   setDefaultEntryDate();
   updateApiBadge();
@@ -81,10 +85,11 @@ function setupNavigation() {
 
       $("pageTitle").textContent = button.dataset.title || button.textContent.trim();
       $("pageDescription").textContent = pageDescriptions[viewId] || "";
-      $("globalSearch").style.display = viewId === "quickEntry" ? "none" : "block";
+      $("globalSearch").style.display = ["quickEntry", "photoEntry"].includes(viewId) ? "none" : "block";
 
       if (viewId === "monthly") renderMonthly();
       if (viewId === "quickEntry") renderStagedRecords();
+      if (viewId === "photoEntry") renderReceiptAnalysis();
       window.scrollTo({ top: 0, behavior: "smooth" });
     });
   });
@@ -133,6 +138,354 @@ function setupQuickEntry() {
     saveStagedRecords();
     renderStagedRecords();
   });
+}
+
+
+function setupPhotoEntry() {
+  const fileInput = $("receiptFile");
+  const analyzeButton = $("analyzeReceipt");
+  const clearButton = $("clearReceipt");
+  const reanalyzeButton = $("reanalyzeReceipt");
+  const addButton = $("addReceiptToStaged");
+
+  fileInput.addEventListener("change", async (event) => {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      showNotice("請選擇照片檔案。", "error");
+      fileInput.value = "";
+      return;
+    }
+
+    setReceiptStatus("正在處理照片…");
+    analyzeButton.disabled = true;
+    clearButton.disabled = true;
+
+    try {
+      receiptImagePayload = await compressReceiptImage(file);
+      $("receiptPreview").src = receiptImagePayload.dataUrl;
+      $("receiptFileName").textContent = file.name || "現場拍照";
+      $("receiptFileSize").textContent = formatFileSize(receiptImagePayload.bytes);
+      $("receiptPreviewWrap").hidden = false;
+      analyzeButton.disabled = false;
+      clearButton.disabled = false;
+      setReceiptStatus("照片已準備完成，請按「AI 辨識照片」。", "ready");
+    } catch (error) {
+      clearReceiptPhoto();
+      showNotice(`照片處理失敗：${error.message}`, "error");
+    }
+  });
+
+  analyzeButton.addEventListener("click", analyzeReceiptPhoto);
+  reanalyzeButton.addEventListener("click", analyzeReceiptPhoto);
+  clearButton.addEventListener("click", clearReceiptPhoto);
+  addButton.addEventListener("click", addReceiptAnalysisToStaged);
+
+  $("receiptDate").addEventListener("input", (event) => {
+    if (receiptAnalysis) receiptAnalysis.date = event.target.value;
+  });
+
+  $("receiptSupplier").addEventListener("input", (event) => {
+    if (receiptAnalysis) receiptAnalysis.supplier = event.target.value;
+  });
+
+  $("receiptRows").addEventListener("input", handleReceiptRowInput);
+  $("receiptRows").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-receipt-remove]");
+    if (!button || !receiptAnalysis) return;
+    const index = Number(button.dataset.receiptRemove);
+    receiptAnalysis.items.splice(index, 1);
+    renderReceiptAnalysis();
+  });
+}
+
+async function compressReceiptImage(file) {
+  const dataUrl = await readFileAsDataUrl(file);
+  const image = await loadImage(dataUrl);
+  const maxSide = 1600;
+  const scale = Math.min(1, maxSide / Math.max(image.naturalWidth || image.width, image.naturalHeight || image.height));
+  const width = Math.max(1, Math.round((image.naturalWidth || image.width) * scale));
+  const height = Math.max(1, Math.round((image.naturalHeight || image.height) * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { alpha: false });
+  context.fillStyle = "#fff";
+  context.fillRect(0, 0, width, height);
+  context.drawImage(image, 0, 0, width, height);
+  const outputDataUrl = canvas.toDataURL("image/jpeg", 0.82);
+  const base64 = outputDataUrl.split(",")[1] || "";
+  return {
+    dataUrl: outputDataUrl,
+    imageBase64: base64,
+    mimeType: "image/jpeg",
+    bytes: Math.round(base64.length * 0.75),
+  };
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("無法讀取照片"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("瀏覽器無法開啟這張照片，請改用 JPG 或 PNG"));
+    image.src = src;
+  });
+}
+
+async function analyzeReceiptPhoto() {
+  if (!receiptImagePayload) {
+    showNotice("請先拍照或選擇照片。", "warn");
+    return;
+  }
+
+  if (!APPS_SCRIPT_URL || !APPS_SCRIPT_URL.includes("/exec")) {
+    showNotice("尚未設定 Apps Script 寫入網址。", "error");
+    return;
+  }
+
+  const buttons = [$("analyzeReceipt"), $("reanalyzeReceipt")];
+  buttons.forEach((button) => { button.disabled = true; });
+  setReceiptStatus("AI 正在辨識，通常需要 10～40 秒…", "loading");
+
+  try {
+    const requestId = `receipt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const response = await postToAppsScriptForResult({
+      action: "analyzeReceipt",
+      requestId,
+      mimeType: receiptImagePayload.mimeType,
+      imageBase64: receiptImagePayload.imageBase64,
+    }, requestId);
+
+    receiptAnalysis = normalizeReceiptAnalysis(response.result || {});
+    renderReceiptAnalysis();
+    setReceiptStatus(`辨識完成，共找到 ${receiptAnalysis.items.length} 個品項。`, "success");
+    showNotice("AI 辨識完成，請檢查日期、供應商、品項與金額後再加入待送清單。");
+  } catch (error) {
+    setReceiptStatus("辨識失敗，請確認 Apps Script 已重新部署。", "error");
+    showNotice(`AI 辨識失敗：${error.message}`, "error");
+  } finally {
+    buttons.forEach((button) => { button.disabled = !receiptImagePayload; });
+  }
+}
+
+function postToAppsScriptForResult(payload, requestId) {
+  return new Promise((resolve, reject) => {
+    const iframeName = `kaiban-ai-${Date.now()}`;
+    const iframe = document.createElement("iframe");
+    iframe.name = iframeName;
+    iframe.hidden = true;
+
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = APPS_SCRIPT_URL;
+    form.target = iframeName;
+    form.hidden = true;
+
+    const field = document.createElement("input");
+    field.type = "hidden";
+    field.name = "payload";
+    field.value = JSON.stringify(payload);
+    form.appendChild(field);
+
+    let finished = false;
+    const cleanup = () => {
+      window.removeEventListener("message", onMessage);
+      form.remove();
+      iframe.remove();
+    };
+
+    const finish = (callback) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timeout);
+      cleanup();
+      callback();
+    };
+
+    const onMessage = (event) => {
+      const data = event.data;
+      if (!data || data.source !== "kaiban-receipt-analyzer" || data.requestId !== requestId) return;
+      finish(() => {
+        if (data.ok) resolve(data);
+        else reject(new Error(data.error || "AI 沒有回傳結果"));
+      });
+    };
+
+    const timeout = setTimeout(() => {
+      finish(() => reject(new Error("辨識逾時，請重新拍照再試一次")));
+    }, 120000);
+
+    iframe.addEventListener("error", () => {
+      finish(() => reject(new Error("無法連線到 Apps Script")));
+    });
+
+    window.addEventListener("message", onMessage);
+    document.body.append(iframe, form);
+    form.submit();
+  });
+}
+
+function normalizeReceiptAnalysis(result) {
+  const fallbackDate = todayInputValue();
+  return {
+    documentType: String(result.documentType || "單據"),
+    date: dateToInputValue(result.date) || fallbackDate,
+    supplier: String(result.supplier || ""),
+    invoiceNumber: String(result.invoiceNumber || ""),
+    total: toNumber(result.total),
+    note: String(result.note || ""),
+    items: Array.isArray(result.items) ? result.items.map((item) => ({
+      name: String(item.name || ""),
+      category: String(item.category || "未分類"),
+      spec: String(item.spec || ""),
+      qty: toNumber(item.qty) || 1,
+      unit: String(item.unit || ""),
+      price: toNumber(item.price),
+      amount: toNumber(item.amount) || roundMoney(toNumber(item.qty) * toNumber(item.price)),
+      note: String(item.note || ""),
+      confidence: Math.max(0, Math.min(1, toNumber(item.confidence))),
+    })) : [],
+  };
+}
+
+function renderReceiptAnalysis() {
+  const empty = $("receiptResultEmpty");
+  const result = $("receiptResult");
+  if (!receiptAnalysis) {
+    empty.hidden = false;
+    result.hidden = true;
+    return;
+  }
+
+  empty.hidden = true;
+  result.hidden = false;
+  $("receiptDate").value = receiptAnalysis.date || todayInputValue();
+  $("receiptSupplier").value = receiptAnalysis.supplier || "";
+  $("receiptDocumentType").textContent = receiptAnalysis.documentType || "單據";
+  $("receiptInvoiceNumber").textContent = receiptAnalysis.invoiceNumber ? `單號：${receiptAnalysis.invoiceNumber}` : "";
+  $("receiptNote").textContent = receiptAnalysis.note || "";
+
+  const computedTotal = receiptAnalysis.items.reduce((sum, item) => sum + toNumber(item.amount), 0);
+  $("receiptTotal").textContent = money(receiptAnalysis.total || computedTotal);
+
+  $("receiptRows").innerHTML = receiptAnalysis.items.length
+    ? receiptAnalysis.items.map((item, index) => `
+      <tr data-receipt-index="${index}">
+        <td><input class="tableInput itemName" data-receipt-field="name" value="${escapeHTML(item.name)}" placeholder="品項"></td>
+        <td><input class="tableInput" data-receipt-field="category" value="${escapeHTML(item.category)}" list="categoryOptions"></td>
+        <td><input class="tableInput" data-receipt-field="spec" value="${escapeHTML(item.spec)}"></td>
+        <td><input class="tableInput numberInput" data-receipt-field="qty" type="number" min="0" step="0.01" value="${item.qty}"></td>
+        <td><input class="tableInput unitInput" data-receipt-field="unit" value="${escapeHTML(item.unit)}" list="unitOptions"></td>
+        <td><input class="tableInput numberInput" data-receipt-field="price" type="number" min="0" step="0.01" value="${item.price}"></td>
+        <td><input class="tableInput numberInput" data-receipt-field="amount" type="number" min="0" step="0.01" value="${item.amount}"></td>
+        <td><span class="confidence ${confidenceClass(item.confidence)}">${Math.round(item.confidence * 100)}%</span></td>
+        <td><button class="removeRow" type="button" data-receipt-remove="${index}">刪除</button></td>
+      </tr>
+    `).join("")
+    : '<tr><td colspan="9" class="empty">沒有辨識到品項，請換一張更清楚的照片。</td></tr>';
+
+  $("addReceiptToStaged").disabled = !receiptAnalysis.items.length;
+}
+
+function handleReceiptRowInput(event) {
+  const input = event.target.closest("[data-receipt-field]");
+  const row = event.target.closest("[data-receipt-index]");
+  if (!input || !row || !receiptAnalysis) return;
+  const index = Number(row.dataset.receiptIndex);
+  const item = receiptAnalysis.items[index];
+  if (!item) return;
+  const field = input.dataset.receiptField;
+  item[field] = ["qty", "price", "amount"].includes(field) ? toNumber(input.value) : input.value;
+  if (["qty", "price"].includes(field)) {
+    item.amount = roundMoney(item.qty * item.price);
+    const amountInput = row.querySelector('[data-receipt-field="amount"]');
+    if (amountInput) amountInput.value = item.amount;
+  }
+  const total = receiptAnalysis.items.reduce((sum, current) => sum + toNumber(current.amount), 0);
+  $("receiptTotal").textContent = money(total);
+}
+
+function addReceiptAnalysisToStaged() {
+  if (!receiptAnalysis || !receiptAnalysis.items.length) return;
+  const date = $("receiptDate").value;
+  const supplier = $("receiptSupplier").value.trim();
+  if (!date || !supplier) {
+    showNotice("請確認日期與供應商都有填寫。", "warn");
+    return;
+  }
+
+  const validItems = receiptAnalysis.items.filter((item) => item.name.trim());
+  if (!validItems.length) {
+    showNotice("至少要有一個品項名稱。", "warn");
+    return;
+  }
+
+  const records = validItems.map((item) => ({
+    date: normalizeDate(date),
+    supplier,
+    name: item.name.trim(),
+    category: item.category.trim() || "未分類",
+    spec: item.spec.trim(),
+    qty: toNumber(item.qty) || 1,
+    unit: item.unit.trim(),
+    price: toNumber(item.price),
+    amount: toNumber(item.amount) || roundMoney(toNumber(item.qty) * toNumber(item.price)),
+    note: [item.note, receiptAnalysis.invoiceNumber ? `單號：${receiptAnalysis.invoiceNumber}` : ""].filter(Boolean).join("；"),
+  }));
+
+  stagedRecords.push(...records);
+  saveStagedRecords();
+  renderStagedRecords();
+  showNotice(`已把 ${records.length} 筆照片辨識資料加入待送清單。`);
+
+  const quickNav = document.querySelector('[data-view="quickEntry"]');
+  if (quickNav) quickNav.click();
+}
+
+function clearReceiptPhoto() {
+  receiptImagePayload = null;
+  receiptAnalysis = null;
+  $("receiptFile").value = "";
+  $("receiptPreview").removeAttribute("src");
+  $("receiptPreviewWrap").hidden = true;
+  $("analyzeReceipt").disabled = true;
+  $("clearReceipt").disabled = true;
+  setReceiptStatus("尚未選擇照片");
+  renderReceiptAnalysis();
+}
+
+function dateToInputValue(value) {
+  const match = String(value || "").match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (!match) return "";
+  return `${match[1]}-${String(match[2]).padStart(2, "0")}-${String(match[3]).padStart(2, "0")}`;
+}
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function confidenceClass(value) {
+  if (value >= 0.8) return "high";
+  if (value >= 0.55) return "medium";
+  return "low";
+}
+
+function setReceiptStatus(message, type = "") {
+  const status = $("receiptAnalyzeStatus");
+  status.textContent = message;
+  status.className = `photoStatus muted ${type}`.trim();
 }
 
 function setupExports() {
@@ -970,6 +1323,10 @@ function updateApiBadge() {
   const connected = Boolean(APPS_SCRIPT_URL && APPS_SCRIPT_URL.includes("/exec"));
   $("apiBadge").textContent = connected ? "Google Sheet 寫入已連接" : "尚未連接寫入接口";
   $("apiBadge").classList.toggle("connected", connected);
+  if ($("photoApiBadge")) {
+    $("photoApiBadge").textContent = connected ? "Gemini AI 已連接" : "尚未連接 AI 辨識接口";
+    $("photoApiBadge").classList.toggle("connected", connected);
+  }
 }
 
 function setDataStatus(text, type) {
