@@ -1,1 +1,81 @@
-const raw=window.KAIBAN_PURCHASES||[];const $=id=>document.getElementById(id);const money=n=>"$"+Number(n||0).toLocaleString("zh-TW",{maximumFractionDigits:2});const norm=s=>String(s||"").toLowerCase().replace(/\s+/g,"");let currentView="dashboard";document.querySelectorAll(".nav").forEach(btn=>{btn.addEventListener("click",()=>{document.querySelectorAll(".nav").forEach(b=>b.classList.remove("active"));btn.classList.add("active");currentView=btn.dataset.view;document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));$(currentView).classList.add("active");$("pageTitle").textContent=btn.textContent.replace(/[📊🔍📦🏪]/g,"").trim();render();});});$("globalSearch").addEventListener("input",render);function filteredRows(){const q=norm($("globalSearch").value);return raw.filter(r=>!q||norm(Object.values(r).join(" ")).includes(q));}function groupFoods(rows){const map={};rows.forEach(r=>{if(!map[r.name])map[r.name]=[];map[r.name].push(r);});return Object.entries(map).map(([name,items])=>{items.sort((a,b)=>String(b.date).localeCompare(String(a.date)));const prices=items.map(x=>Number(x.unitPrice)).filter(x=>!Number.isNaN(x));return{name,items,latest:items[0],avg:prices.reduce((a,b)=>a+b,0)/prices.length,min:Math.min(...prices),max:Math.max(...prices)}}).sort((a,b)=>a.name.localeCompare(b.name,"zh-Hant"));}function renderDashboard(){$("statRows").textContent=raw.length;$("statTotal").textContent=money(raw.reduce((s,r)=>s+Number(r.total||0),0));$("statSuppliers").textContent=new Set(raw.map(r=>r.supplier)).size;$("statFoods").textContent=new Set(raw.map(r=>r.name)).size;const recent=[...raw].sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,8);$("recentList").innerHTML=recent.map(r=>`<div class="item"><div><strong>${r.name}</strong><br><span class="muted">${r.date}｜${r.supplier}</span></div><div><strong>${money(r.unitPrice)}</strong><br><span class="muted">${r.qty} ${r.unit}</span></div></div>`).join("");}function renderFoods(rows){const foods=groupFoods(rows);$("foodCards").innerHTML=foods.map(f=>`<article class="foodCard"><span class="tag">${f.latest.category}</span><span class="tag">${f.latest.supplier}</span><h3>${f.name}</h3><div class="price">${money(f.latest.unitPrice)} / ${f.latest.unit}</div><div class="meta"><div class="label">最近採購</div><div>${f.latest.date}</div><div class="label">平均</div><div>${money(f.avg)}</div><div class="label">最低</div><div>${money(f.min)}</div><div class="label">最高</div><div>${money(f.max)}</div><div class="label">採購次數</div><div>${f.items.length}</div></div></article>`).join("")||`<div class="foodCard">找不到資料</div>`;}function renderPurchases(rows){$("purchaseRows").innerHTML=rows.map(r=>`<tr><td>${r.date}</td><td>${r.supplier}</td><td><strong>${r.name}</strong></td><td>${r.category}</td><td>${r.spec||""}</td><td>${r.qty} ${r.unit}</td><td>${money(r.unitPrice)}</td><td>${money(r.total)}</td><td>${r.note||""}</td></tr>`).join("");}function renderSuppliers(){const map={};raw.forEach(r=>{if(!map[r.supplier])map[r.supplier]={total:0,count:0,foods:new Set()};map[r.supplier].total+=Number(r.total||0);map[r.supplier].count+=1;map[r.supplier].foods.add(r.name);});const cards=Object.entries(map).map(([name,s])=>({name,...s})).sort((a,b)=>b.total-a.total);$("supplierCards").innerHTML=cards.map(s=>`<article class="foodCard"><span class="tag">供應商</span><h3>${s.name}</h3><div class="price">${money(s.total)}</div><div class="meta"><div class="label">採購筆數</div><div>${s.count}</div><div class="label">食材數</div><div>${s.foods.size}</div></div></article>`).join("");}function render(){const rows=filteredRows();renderDashboard();renderFoods(rows);renderPurchases(rows);renderSuppliers();}render();
+const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vS6DeEloMgCjxhelHhJ53nBuz6ROEX13csDEZubiVkiz0Migol87Av33UT--i7r7ovTG8pxCkFVw_vo/pub?gid=0&single=true&output=csv";
+
+let products = [];
+
+const money = n => "$" + Number(n || 0).toLocaleString("zh-TW");
+const norm = s => String(s || "").toLowerCase().trim();
+
+async function loadProducts() {
+  const res = await fetch(SHEET_CSV_URL + "&t=" + Date.now());
+  const text = await res.text();
+  products = parseCSV(text);
+  render();
+}
+
+function parseCSV(text) {
+  const lines = text.trim().split(/\r?\n/);
+  const headers = lines[0].split(",").map(h => h.trim());
+
+  return lines.slice(1).map(line => {
+    const values = line.split(",");
+    const item = {};
+    headers.forEach((h, i) => item[h] = values[i]?.trim() || "");
+    return item;
+  }).filter(x => x["品項"]);
+}
+
+function render() {
+  const q = norm(document.getElementById("globalSearch")?.value || "");
+  const list = products.filter(p => {
+    return !q || Object.values(p).some(v => norm(v).includes(q));
+  });
+
+  renderStats(list);
+  renderProductCards(list);
+}
+
+function renderStats(list) {
+  const statRows = document.getElementById("statRows");
+  const statFoods = document.getElementById("statFoods");
+  const statSuppliers = document.getElementById("statSuppliers");
+  const statTotal = document.getElementById("statTotal");
+
+  if (statRows) statRows.textContent = products.length;
+  if (statFoods) statFoods.textContent = products.length;
+  if (statSuppliers) {
+    statSuppliers.textContent = new Set(products.map(x => x["供應商"])).size;
+  }
+  if (statTotal) {
+    statTotal.textContent = money(
+      products.reduce((sum, x) => sum + Number(x["最新單價"] || 0), 0)
+    );
+  }
+}
+
+function renderProductCards(list) {
+  const foodCards = document.getElementById("foodCards");
+  if (!foodCards) return;
+
+  if (!list.length) {
+    foodCards.innerHTML = `<div class="foodCard">找不到商品</div>`;
+    return;
+  }
+
+  foodCards.innerHTML = list.map(p => `
+    <article class="foodCard">
+      <span class="tag">${p["分類"] || "未分類"}</span>
+      <span class="tag">${p["供應商"] || "未填供應商"}</span>
+      <h3>${p["品項"]}</h3>
+      <div class="price">${money(p["最新單價"])} / ${p["單位"] || ""}</div>
+      <div class="meta">
+        <div class="label">規格</div><div>${p["規格"] || "—"}</div>
+        <div class="label">最近採購</div><div>${p["最近採購日"] || "—"}</div>
+        <div class="label">備註</div><div>${p["備註"] || "—"}</div>
+      </div>
+    </article>
+  `).join("");
+}
+
+document.getElementById("globalSearch")?.addEventListener("input", render);
+
+loadProducts();
