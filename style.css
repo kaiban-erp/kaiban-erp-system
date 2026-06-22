@@ -428,3 +428,62 @@ tbody tr:hover { background: rgba(238,243,233,.48); }
   .analysisBadges { justify-content: flex-start; }
   .aiWorkflowNote { display: grid; }
 }
+
+
+/* 食材價格比較 */
+.priceCompareCard { position: relative; overflow: hidden; }
+.cardTags { min-height: 30px; }
+.priceChange {
+  display: inline-flex;
+  align-items: center;
+  margin: -4px 0 14px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+.priceChange.priceUp { color: #a94f2b; background: #fff0e7; }
+.priceChange.priceDown { color: #317148; background: #eaf6ed; }
+.priceChange.priceFlat { color: var(--muted); background: #f1eee7; }
+.bestBuyBox {
+  display: grid;
+  gap: 3px;
+  margin-bottom: 14px;
+  padding: 12px 13px;
+  border: 1px solid #cfe0ca;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #f0f7ec, #fffdf7);
+}
+.bestBuyBox span { color: var(--green); font-size: 12px; font-weight: 800; }
+.bestBuyBox strong { font-size: 16px; }
+.bestBuyBox small { color: var(--muted); }
+.compactMeta { grid-template-columns: 92px minmax(0, 1fr); }
+.supplierCompare { margin-top: 15px; border-top: 1px solid var(--line); }
+.supplierCompare summary {
+  padding: 13px 0 4px;
+  color: var(--green-dark);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.supplierCompareList { display: grid; gap: 7px; margin-top: 9px; }
+.supplierPriceRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+.supplierPriceRow.isCheapest { border-color: #b9d4b7; background: #f1f8ee; }
+.supplierPriceRow strong, .supplierPriceRow small { display: block; }
+.supplierPriceRow small { margin-top: 3px; color: var(--muted); font-size: 11px; }
+.supplierPriceValue { flex: 0 0 auto; text-align: right; }
+.supplierPriceValue strong { color: var(--green); }
+.compareWarning { margin: 11px 0 0; color: #9b672c; font-size: 11px; line-height: 1.5; }
+
+@media (max-width: 420px) {
+  .supplierPriceRow { align-items: flex-start; }
+}

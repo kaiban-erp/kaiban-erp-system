@@ -703,7 +703,7 @@ async function loadData() {
   }
 
   if (purchaseRows.length) {
-    purchases = purchaseRows.map(normalizePurchase);
+    purchases = purchaseRows.map((row, index) => normalizePurchase(row, index));
   } else {
     purchases = getFallbackPurchases();
     usedFallback = purchases.length > 0;
@@ -817,7 +817,7 @@ function normalizeProduct(row) {
   };
 }
 
-function normalizePurchase(row) {
+function normalizePurchase(row, sourceIndex = 0) {
   const qty = toNumber(row["數量"] ?? row.qty);
   const price = toNumber(row["單價"] ?? row.unitPrice ?? row.price);
   const amount = toNumber(row["金額"] ?? row["小計"] ?? row.total ?? row.amount) || qty * price;
@@ -833,12 +833,13 @@ function normalizePurchase(row) {
     price,
     amount,
     note: row["備註"] ?? row.note ?? "",
+    sourceIndex,
   };
 }
 
 function getFallbackPurchases() {
   const source = Array.isArray(window.KAIBAN_PURCHASES) ? window.KAIBAN_PURCHASES : [];
-  return source.filter((row) => row && (row.name || row["品項"])).map(normalizePurchase);
+  return source.filter((row) => row && (row.name || row["品項"])).map((row, index) => normalizePurchase(row, index));
 }
 
 function deriveProductsFromPurchases(list) {
@@ -965,47 +966,188 @@ function renderProductCards(list) {
 
   $("foodCards").innerHTML = list.map((product) => {
     const priceStats = getProductPriceStats(product);
+    const change = priceStats.change;
+    const changeClass = change.direction === "up"
+      ? "priceUp"
+      : change.direction === "down"
+        ? "priceDown"
+        : "priceFlat";
+
+    const changeText = change.hasPrevious
+      ? `${change.direction === "up" ? "↑" : change.direction === "down" ? "↓" : "—"} 較上次 ${signedMoney(change.amount)}（${signedPercent(change.percent)}）`
+      : "首次價格紀錄";
+
+    const supplierRows = priceStats.suppliers.map((supplier, index) => `
+      <div class="supplierPriceRow ${index === 0 ? "isCheapest" : ""}">
+        <div>
+          <strong>${escapeHTML(supplier.name)}</strong>
+          <small>最近 ${escapeHTML(supplier.latestDate || "—")}｜歷史最低 ${money(supplier.minPrice)}</small>
+        </div>
+        <div class="supplierPriceValue">
+          <strong>${money(supplier.latestPrice)}</strong>
+          <small>/ ${escapeHTML(product.unit || "單位")}</small>
+        </div>
+      </div>
+    `).join("");
+
     return `
-      <article class="foodCard">
-        <span class="tag">${escapeHTML(product.category || "未分類")}</span>
-        <span class="tag">${escapeHTML(product.supplier || "未填供應商")}</span>
+      <article class="foodCard priceCompareCard">
+        <div class="cardTags">
+          <span class="tag">${escapeHTML(product.category || "未分類")}</span>
+          <span class="tag">最新：${escapeHTML(priceStats.latestSupplier || product.supplier || "未填供應商")}</span>
+        </div>
         <h3>${escapeHTML(product.name)}</h3>
         <div class="price">${money(priceStats.latest)} <small>/ ${escapeHTML(product.unit || "單位")}</small></div>
-        <div class="meta">
-          <span class="label">ERP 代碼</span><span>${escapeHTML(product.code || "—")}</span>
-          <span class="label">規格</span><span>${escapeHTML(product.spec || "—")}</span>
-          <span class="label">最低價</span><span>${money(priceStats.min)}</span>
-          <span class="label">最高價</span><span>${money(priceStats.max)}</span>
-          <span class="label">平均價</span><span>${money(priceStats.average)}</span>
-          <span class="label">最近採購</span><span>${escapeHTML(product.lastDate || "—")}</span>
-          <span class="label">備註</span><span>${escapeHTML(product.note || "—")}</span>
+        <div class="priceChange ${changeClass}">${changeText}</div>
+
+        <div class="bestBuyBox">
+          <span>歷史最便宜購買地</span>
+          <strong>${escapeHTML(priceStats.cheapestSupplier || "尚無資料")} · ${money(priceStats.min)} / ${escapeHTML(product.unit || "單位")}</strong>
+          <small>${escapeHTML(priceStats.cheapestDate || "—")}</small>
         </div>
+
+        <div class="meta compactMeta">
+          <span class="label">目前較便宜</span><span>${escapeHTML(priceStats.currentCheapestSupplier || "—")} · ${money(priceStats.currentCheapestPrice)}</span>
+          <span class="label">上次價格</span><span>${change.hasPrevious ? money(change.previous) : "—"}</span>
+          <span class="label">平均價格</span><span>${money(priceStats.average)}</span>
+          <span class="label">最近採購</span><span>${escapeHTML(priceStats.latestDate || product.lastDate || "—")}</span>
+          <span class="label">規格</span><span>${escapeHTML(product.spec || "—")}</span>
+          <span class="label">ERP 代碼</span><span>${escapeHTML(product.code || "—")}</span>
+        </div>
+
+        ${priceStats.suppliers.length ? `
+          <details class="supplierCompare">
+            <summary>查看供應商價格比較（${priceStats.suppliers.length}）</summary>
+            <div class="supplierCompareList">${supplierRows}</div>
+          </details>
+        ` : ""}
+
+        ${priceStats.mixedFormat ? '<p class="compareWarning">部分紀錄的規格或單位不同，請確認後再比較。</p>' : ""}
       </article>
     `;
   }).join("");
 }
 
 function getProductPriceStats(product) {
-  const matching = purchases.filter((purchase) => norm(purchase.name) === norm(product.name) && purchase.price > 0);
+  const sameName = purchases.filter((purchase) =>
+    norm(purchase.name) === norm(product.name) && purchase.price > 0
+  );
+
+  const productSpec = norm(product.spec);
+  const productUnit = norm(product.unit);
+  const exactMatching = sameName.filter((purchase) => {
+    const purchaseSpec = norm(purchase.spec);
+    const purchaseUnit = norm(purchase.unit);
+    const specMatches = !productSpec || !purchaseSpec || productSpec === purchaseSpec;
+    const unitMatches = !productUnit || !purchaseUnit || productUnit === purchaseUnit;
+    return specMatches && unitMatches;
+  });
+
+  const matching = exactMatching.length ? exactMatching : sameName;
+  const sorted = [...matching].sort(comparePurchaseNewestFirst);
+  const latestPurchase = sorted[0];
+  const previousPurchase = sorted[1];
   const prices = matching.map((purchase) => purchase.price);
-  const latestPurchase = [...matching].sort((a, b) => compareDate(b.date, a.date))[0];
 
   if (!prices.length) {
     const latest = product.price || 0;
     return {
       latest,
+      latestSupplier: product.supplier || "",
+      latestDate: product.lastDate || "",
       min: product.minPrice || latest,
       max: product.maxPrice || latest,
       average: product.avgPrice || latest,
+      cheapestSupplier: product.supplier || "",
+      cheapestDate: product.lastDate || "",
+      currentCheapestSupplier: product.supplier || "",
+      currentCheapestPrice: latest,
+      suppliers: [],
+      mixedFormat: false,
+      change: {
+        hasPrevious: false,
+        previous: 0,
+        amount: 0,
+        percent: 0,
+        direction: "flat",
+      },
     };
   }
 
+  const cheapestPurchase = [...matching].sort((a, b) => {
+    if (a.price !== b.price) return a.price - b.price;
+    return comparePurchaseNewestFirst(a, b);
+  })[0];
+
+  const supplierMap = new Map();
+  matching.forEach((purchase) => {
+    const supplierName = purchase.supplier || "未填供應商";
+    if (!supplierMap.has(supplierName)) supplierMap.set(supplierName, []);
+    supplierMap.get(supplierName).push(purchase);
+  });
+
+  const suppliers = [...supplierMap.entries()].map(([name, supplierPurchases]) => {
+    const supplierSorted = [...supplierPurchases].sort(comparePurchaseNewestFirst);
+    const supplierPrices = supplierPurchases.map((purchase) => purchase.price);
+    return {
+      name,
+      latestPrice: supplierSorted[0]?.price || 0,
+      latestDate: supplierSorted[0]?.date || "",
+      minPrice: Math.min(...supplierPrices),
+      averagePrice: supplierPrices.reduce((sum, price) => sum + price, 0) / supplierPrices.length,
+      count: supplierPurchases.length,
+    };
+  }).sort((a, b) => {
+    if (a.latestPrice !== b.latestPrice) return a.latestPrice - b.latestPrice;
+    return compareDate(b.latestDate, a.latestDate);
+  });
+
+  const latest = latestPurchase?.price || product.price || 0;
+  const previous = previousPurchase?.price || 0;
+  const changeAmount = previousPurchase ? latest - previous : 0;
+  const changePercent = previousPurchase && previous > 0 ? (changeAmount / previous) * 100 : 0;
+
+  const formatKeys = new Set(matching.map((purchase) => `${norm(purchase.spec)}|${norm(purchase.unit)}`));
+
   return {
-    latest: latestPurchase?.price || product.price || 0,
+    latest,
+    latestSupplier: latestPurchase?.supplier || product.supplier || "",
+    latestDate: latestPurchase?.date || product.lastDate || "",
     min: Math.min(...prices),
     max: Math.max(...prices),
     average: prices.reduce((sum, price) => sum + price, 0) / prices.length,
+    cheapestSupplier: cheapestPurchase?.supplier || "",
+    cheapestDate: cheapestPurchase?.date || "",
+    currentCheapestSupplier: suppliers[0]?.name || "",
+    currentCheapestPrice: suppliers[0]?.latestPrice || 0,
+    suppliers,
+    mixedFormat: formatKeys.size > 1,
+    change: {
+      hasPrevious: Boolean(previousPurchase),
+      previous,
+      amount: changeAmount,
+      percent: changePercent,
+      direction: changeAmount > 0 ? "up" : changeAmount < 0 ? "down" : "flat",
+    },
   };
+}
+
+function comparePurchaseNewestFirst(a, b) {
+  const dateCompare = compareDate(b.date, a.date);
+  if (dateCompare !== 0) return dateCompare;
+  return (b.sourceIndex || 0) - (a.sourceIndex || 0);
+}
+
+function signedMoney(value) {
+  const number = toNumber(value);
+  if (number === 0) return "$0";
+  return `${number > 0 ? "+" : "−"}${money(Math.abs(number))}`;
+}
+
+function signedPercent(value) {
+  const number = Number(value) || 0;
+  if (number === 0) return "0%";
+  return `${number > 0 ? "+" : "−"}${Math.abs(number).toLocaleString("zh-TW", { maximumFractionDigits: 1 })}%`;
 }
 
 function renderPurchaseRows(list) {
