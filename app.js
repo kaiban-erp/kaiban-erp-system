@@ -147,6 +147,7 @@ function setupPhotoEntry() {
   const clearButton = $("clearReceipt");
   const reanalyzeButton = $("reanalyzeReceipt");
   const addButton = $("addReceiptToStaged");
+  const addItemButton = $("addReceiptItem");
 
   fileInput.addEventListener("change", async (event) => {
     const file = event.target.files && event.target.files[0];
@@ -170,7 +171,7 @@ function setupPhotoEntry() {
       $("receiptPreviewWrap").hidden = false;
       analyzeButton.disabled = false;
       clearButton.disabled = false;
-      setReceiptStatus("照片已準備完成，請按「AI 辨識照片」。", "ready");
+      setReceiptStatus("照片已準備完成，請按「AI 智慧辨識」。", "ready");
     } catch (error) {
       clearReceiptPhoto();
       showNotice(`照片處理失敗：${error.message}`, "error");
@@ -181,13 +182,20 @@ function setupPhotoEntry() {
   reanalyzeButton.addEventListener("click", analyzeReceiptPhoto);
   clearButton.addEventListener("click", clearReceiptPhoto);
   addButton.addEventListener("click", addReceiptAnalysisToStaged);
+  addItemButton.addEventListener("click", addBlankReceiptItem);
 
   $("receiptDate").addEventListener("input", (event) => {
-    if (receiptAnalysis) receiptAnalysis.date = event.target.value;
+    if (!receiptAnalysis) return;
+    receiptAnalysis.date = event.target.value;
+    receiptAnalysis.dateStatus = "confirmed";
+    applyReceiptHeaderStatus();
   });
 
   $("receiptSupplier").addEventListener("input", (event) => {
-    if (receiptAnalysis) receiptAnalysis.supplier = event.target.value;
+    if (!receiptAnalysis) return;
+    receiptAnalysis.supplier = event.target.value;
+    receiptAnalysis.supplierStatus = "confirmed";
+    applyReceiptHeaderStatus();
   });
 
   $("receiptRows").addEventListener("input", handleReceiptRowInput);
@@ -203,7 +211,7 @@ function setupPhotoEntry() {
 async function compressReceiptImage(file) {
   const dataUrl = await readFileAsDataUrl(file);
   const image = await loadImage(dataUrl);
-  const maxSide = 1280;
+  const maxSide = 1600;
   const scale = Math.min(1, maxSide / Math.max(image.naturalWidth || image.width, image.naturalHeight || image.height));
   const width = Math.max(1, Math.round((image.naturalWidth || image.width) * scale));
   const height = Math.max(1, Math.round((image.naturalHeight || image.height) * scale));
@@ -214,7 +222,7 @@ async function compressReceiptImage(file) {
   context.fillStyle = "#fff";
   context.fillRect(0, 0, width, height);
   context.drawImage(image, 0, 0, width, height);
-  const outputDataUrl = canvas.toDataURL("image/jpeg", 0.72);
+  const outputDataUrl = canvas.toDataURL("image/jpeg", 0.82);
   const base64 = outputDataUrl.split(",")[1] || "";
   return {
     dataUrl: outputDataUrl,
@@ -255,7 +263,7 @@ async function analyzeReceiptPhoto() {
 
   const buttons = [$("analyzeReceipt"), $("reanalyzeReceipt")];
   buttons.forEach((button) => { button.disabled = true; });
-  setReceiptStatus("AI 正在快速辨識，通常需要 5～20 秒…", "loading");
+  setReceiptStatus("AI 先快速讀取；遇到手寫、模糊或特殊格式時會自動加強辨識…", "loading");
 
   try {
     const requestId = `receipt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -268,8 +276,9 @@ async function analyzeReceiptPhoto() {
 
     receiptAnalysis = normalizeReceiptAnalysis(response.result || {});
     renderReceiptAnalysis();
-    setReceiptStatus(`辨識完成，共找到 ${receiptAnalysis.items.length} 個品項。`, "success");
-    showNotice("AI 辨識完成，請檢查日期、供應商、品項與金額後再加入待送清單。");
+    const modeText = receiptAnalysis.enhancedAnalysis ? "已使用加強辨識" : "快速辨識完成";
+    setReceiptStatus(`${modeText}，找到 ${receiptAnalysis.items.length} 個品項。`, "success");
+    showNotice("AI 已把可讀內容轉成 ERP 欄位。請優先檢查黃色推算欄位與紅色待確認欄位。");
   } catch (error) {
     setReceiptStatus("辨識失敗，請確認 Apps Script 已重新部署。", "error");
     showNotice(`AI 辨識失敗：${error.message}`, "error");
@@ -323,7 +332,7 @@ function postToAppsScriptForResult(payload, requestId) {
 
     const timeout = setTimeout(() => {
       finish(() => reject(new Error("辨識逾時，請重新拍照再試一次")));
-    }, 120000);
+    }, 180000);
 
     iframe.addEventListener("error", () => {
       finish(() => reject(new Error("無法連線到 Apps Script")));
@@ -336,26 +345,65 @@ function postToAppsScriptForResult(payload, requestId) {
 }
 
 function normalizeReceiptAnalysis(result) {
-  const fallbackDate = todayInputValue();
   return {
     documentType: String(result.documentType || "單據"),
-    date: dateToInputValue(result.date) || fallbackDate,
+    documentQuality: normalizeQuality(result.documentQuality),
+    isHandwritten: Boolean(result.isHandwritten),
+    modelUsed: String(result.modelUsed || ""),
+    enhancedAnalysis: Boolean(result.enhancedAnalysis),
+    date: dateToInputValue(result.date),
+    dateStatus: normalizeFieldStatus(result.dateStatus, result.date ? "read" : "missing"),
     supplier: String(result.supplier || ""),
+    supplierStatus: normalizeFieldStatus(result.supplierStatus, result.supplier ? "read" : "missing"),
     invoiceNumber: String(result.invoiceNumber || ""),
+    invoiceNumberStatus: normalizeFieldStatus(result.invoiceNumberStatus, result.invoiceNumber ? "read" : "missing"),
     total: toNumber(result.total),
+    totalStatus: normalizeFieldStatus(result.totalStatus, toNumber(result.total) > 0 ? "read" : "missing"),
     note: String(result.note || ""),
-    items: Array.isArray(result.items) ? result.items.map((item) => ({
-      name: String(item.name || ""),
-      category: String(item.category || "未分類"),
-      spec: String(item.spec || ""),
-      qty: toNumber(item.qty) || 1,
-      unit: String(item.unit || ""),
-      price: toNumber(item.price),
-      amount: toNumber(item.amount) || roundMoney(toNumber(item.qty) * toNumber(item.price)),
-      note: String(item.note || ""),
-      confidence: Math.max(0, Math.min(1, toNumber(item.confidence))),
-    })) : [],
+    rawText: String(result.rawText || ""),
+    issues: Array.isArray(result.issues) ? result.issues.map(String).filter(Boolean) : [],
+    items: Array.isArray(result.items) ? result.items.map((item) => normalizeReceiptItem(item)) : [],
   };
+}
+
+function normalizeReceiptItem(item = {}) {
+  const qty = toNumber(item.qty);
+  const price = toNumber(item.price);
+  const amount = toNumber(item.amount);
+  const source = item.fieldStatus || {};
+  return {
+    name: String(item.name || ""),
+    category: String(item.category || "未分類"),
+    spec: String(item.spec || ""),
+    qty,
+    unit: String(item.unit || ""),
+    price,
+    amount,
+    note: String(item.note || ""),
+    originalLine: String(item.originalLine || ""),
+    confidence: Math.max(0, Math.min(1, toNumber(item.confidence))),
+    reviewReasons: Array.isArray(item.reviewReasons) ? item.reviewReasons.map(String).filter(Boolean) : [],
+    fieldStatus: {
+      name: normalizeFieldStatus(source.name, item.name ? "read" : "missing"),
+      category: normalizeFieldStatus(source.category, item.category ? "inferred" : "missing"),
+      spec: normalizeFieldStatus(source.spec, item.spec ? "read" : "missing"),
+      qty: normalizeFieldStatus(source.qty, qty > 0 ? "read" : "missing"),
+      unit: normalizeFieldStatus(source.unit, item.unit ? "read" : "missing"),
+      price: normalizeFieldStatus(source.price, price > 0 ? "read" : "missing"),
+      amount: normalizeFieldStatus(source.amount, amount > 0 ? "read" : "missing"),
+      note: normalizeFieldStatus(source.note, item.note ? "read" : "missing"),
+    },
+  };
+}
+
+function normalizeFieldStatus(value, fallback = "missing") {
+  const status = String(value || "").toLowerCase();
+  return ["read", "inferred", "missing", "confirmed"].includes(status) ? status : fallback;
+}
+
+function normalizeQuality(value) {
+  const quality = String(value || "").toLowerCase();
+  return ["clear", "usable", "difficult"].includes(quality) ? quality : "usable";
 }
 
 function renderReceiptAnalysis() {
@@ -364,37 +412,57 @@ function renderReceiptAnalysis() {
   if (!receiptAnalysis) {
     empty.hidden = false;
     result.hidden = true;
+    $("receiptModelBadge").textContent = "尚未辨識";
+    $("receiptQualityBadge").textContent = "品質未判定";
     return;
   }
 
   empty.hidden = true;
   result.hidden = false;
-  $("receiptDate").value = receiptAnalysis.date || todayInputValue();
+  $("receiptDate").value = receiptAnalysis.date || "";
   $("receiptSupplier").value = receiptAnalysis.supplier || "";
   $("receiptDocumentType").textContent = receiptAnalysis.documentType || "單據";
   $("receiptInvoiceNumber").textContent = receiptAnalysis.invoiceNumber ? `單號：${receiptAnalysis.invoiceNumber}` : "";
   $("receiptNote").textContent = receiptAnalysis.note || "";
+  $("receiptRawText").value = receiptAnalysis.rawText || "";
+
+  $("receiptModelBadge").textContent = receiptAnalysis.enhancedAnalysis ? "加強辨識" : "快速辨識";
+  $("receiptModelBadge").className = `analysisBadge ${receiptAnalysis.enhancedAnalysis ? "enhanced" : "fast"}`;
+  $("receiptQualityBadge").textContent = qualityLabel(receiptAnalysis.documentQuality);
+  $("receiptQualityBadge").className = `analysisBadge quality-${receiptAnalysis.documentQuality}`;
+  applyReceiptHeaderStatus();
+  renderReceiptIssues();
 
   const computedTotal = receiptAnalysis.items.reduce((sum, item) => sum + toNumber(item.amount), 0);
   $("receiptTotal").textContent = money(receiptAnalysis.total || computedTotal);
 
   $("receiptRows").innerHTML = receiptAnalysis.items.length
-    ? receiptAnalysis.items.map((item, index) => `
-      <tr data-receipt-index="${index}">
-        <td><input class="tableInput itemName" data-receipt-field="name" value="${escapeHTML(item.name)}" placeholder="品項"></td>
-        <td><input class="tableInput" data-receipt-field="category" value="${escapeHTML(item.category)}" list="categoryOptions"></td>
-        <td><input class="tableInput" data-receipt-field="spec" value="${escapeHTML(item.spec)}"></td>
-        <td><input class="tableInput numberInput" data-receipt-field="qty" type="number" min="0" step="0.01" value="${item.qty}"></td>
-        <td><input class="tableInput unitInput" data-receipt-field="unit" value="${escapeHTML(item.unit)}" list="unitOptions"></td>
-        <td><input class="tableInput numberInput" data-receipt-field="price" type="number" min="0" step="0.01" value="${item.price}"></td>
-        <td><input class="tableInput numberInput" data-receipt-field="amount" type="number" min="0" step="0.01" value="${item.amount}"></td>
-        <td><span class="confidence ${confidenceClass(item.confidence)}">${Math.round(item.confidence * 100)}%</span></td>
-        <td><button class="removeRow" type="button" data-receipt-remove="${index}">刪除</button></td>
-      </tr>
-    `).join("")
-    : '<tr><td colspan="9" class="empty">沒有辨識到品項，請換一張更清楚的照片。</td></tr>';
+    ? receiptAnalysis.items.map((item, index) => renderReceiptItemRow(item, index)).join("")
+    : '<tr><td colspan="10" class="empty">沒有辨識到品項。可按「新增空白品項」手動補入，或換一張更清楚的照片。</td></tr>';
 
   $("addReceiptToStaged").disabled = !receiptAnalysis.items.length;
+}
+
+function renderReceiptItemRow(item, index) {
+  const status = item.fieldStatus || {};
+  return `
+    <tr data-receipt-index="${index}" class="${item.confidence < 0.55 ? "lowConfidenceRow" : ""}">
+      <td><input class="tableInput itemName ${fieldStatusClass(status.name)}" title="${fieldStatusTitle(status.name)}" data-receipt-field="name" value="${escapeHTML(item.name)}" placeholder="品項"></td>
+      <td><input class="tableInput ${fieldStatusClass(status.category)}" title="${fieldStatusTitle(status.category)}" data-receipt-field="category" value="${escapeHTML(item.category)}" list="categoryOptions"></td>
+      <td><input class="tableInput ${fieldStatusClass(status.spec)}" title="${fieldStatusTitle(status.spec)}" data-receipt-field="spec" value="${escapeHTML(item.spec)}"></td>
+      <td><input class="tableInput numberInput ${fieldStatusClass(status.qty)}" title="${fieldStatusTitle(status.qty)}" data-receipt-field="qty" type="number" min="0" step="0.01" value="${displayNumberInput(item.qty)}"></td>
+      <td><input class="tableInput unitInput ${fieldStatusClass(status.unit)}" title="${fieldStatusTitle(status.unit)}" data-receipt-field="unit" value="${escapeHTML(item.unit)}" list="unitOptions"></td>
+      <td><input class="tableInput numberInput ${fieldStatusClass(status.price)}" title="${fieldStatusTitle(status.price)}" data-receipt-field="price" type="number" min="0" step="0.01" value="${displayNumberInput(item.price)}"></td>
+      <td><input class="tableInput numberInput ${fieldStatusClass(status.amount)}" title="${fieldStatusTitle(status.amount)}" data-receipt-field="amount" type="number" min="0" step="0.01" value="${displayNumberInput(item.amount)}"></td>
+      <td><span class="confidence ${confidenceClass(item.confidence)}">${Math.round(item.confidence * 100)}%</span></td>
+      <td><div class="itemStatusSummary" title="${escapeHTML(item.reviewReasons.join("；") || item.originalLine)}">${renderItemStatusSummary(item)}</div></td>
+      <td><button class="removeRow" type="button" data-receipt-remove="${index}">刪除</button></td>
+    </tr>`;
+}
+
+function displayNumberInput(value) {
+  const number = toNumber(value);
+  return number > 0 ? number : "";
 }
 
 function handleReceiptRowInput(event) {
@@ -406,13 +474,100 @@ function handleReceiptRowInput(event) {
   if (!item) return;
   const field = input.dataset.receiptField;
   item[field] = ["qty", "price", "amount"].includes(field) ? toNumber(input.value) : input.value;
-  if (["qty", "price"].includes(field)) {
+  item.fieldStatus[field] = "confirmed";
+  input.classList.remove("field-read", "field-inferred", "field-missing");
+  input.classList.add("field-confirmed");
+  input.title = fieldStatusTitle("confirmed");
+
+  if (["qty", "price"].includes(field) && item.qty > 0 && item.price > 0) {
     item.amount = roundMoney(item.qty * item.price);
+    item.fieldStatus.amount = "confirmed";
     const amountInput = row.querySelector('[data-receipt-field="amount"]');
-    if (amountInput) amountInput.value = item.amount;
+    if (amountInput) {
+      amountInput.value = item.amount;
+      amountInput.classList.remove("field-read", "field-inferred", "field-missing");
+      amountInput.classList.add("field-confirmed");
+      amountInput.title = fieldStatusTitle("confirmed");
+    }
   }
+
+  const summary = row.querySelector(".itemStatusSummary");
+  if (summary) summary.innerHTML = renderItemStatusSummary(item);
   const total = receiptAnalysis.items.reduce((sum, current) => sum + toNumber(current.amount), 0);
   $("receiptTotal").textContent = money(total);
+}
+
+function addBlankReceiptItem() {
+  if (!receiptAnalysis) {
+    receiptAnalysis = normalizeReceiptAnalysis({});
+  }
+  receiptAnalysis.items.push(normalizeReceiptItem({
+    category: "未分類",
+    confidence: 0,
+    fieldStatus: {
+      name: "missing", category: "missing", spec: "missing", qty: "missing",
+      unit: "missing", price: "missing", amount: "missing", note: "missing",
+    },
+    reviewReasons: ["人工新增，請確認所有欄位"],
+  }));
+  renderReceiptAnalysis();
+}
+
+function applyReceiptHeaderStatus() {
+  if (!receiptAnalysis) return;
+  applyStatusToInput($("receiptDate"), receiptAnalysis.dateStatus);
+  applyStatusToInput($("receiptSupplier"), receiptAnalysis.supplierStatus);
+  $("receiptDateHint").textContent = fieldStatusTitle(receiptAnalysis.dateStatus);
+  $("receiptSupplierHint").textContent = fieldStatusTitle(receiptAnalysis.supplierStatus);
+}
+
+function applyStatusToInput(input, status) {
+  if (!input) return;
+  input.classList.remove("field-read", "field-inferred", "field-missing", "field-confirmed");
+  input.classList.add(fieldStatusClass(status));
+  input.title = fieldStatusTitle(status);
+}
+
+function renderReceiptIssues() {
+  const box = $("receiptIssues");
+  if (!receiptAnalysis || !receiptAnalysis.issues.length) {
+    box.hidden = true;
+    box.innerHTML = "";
+    return;
+  }
+  box.hidden = false;
+  box.innerHTML = `<strong>需要留意</strong><ul>${receiptAnalysis.issues.map((issue) => `<li>${escapeHTML(issue)}</li>`).join("")}</ul>`;
+}
+
+function renderItemStatusSummary(item) {
+  const values = Object.values(item.fieldStatus || {});
+  const counts = values.reduce((result, value) => {
+    result[value] = (result[value] || 0) + 1;
+    return result;
+  }, {});
+  const chips = [];
+  if (counts.read) chips.push(`<span class="miniStatus read">原文 ${counts.read}</span>`);
+  if (counts.inferred) chips.push(`<span class="miniStatus inferred">推算 ${counts.inferred}</span>`);
+  if (counts.missing) chips.push(`<span class="miniStatus missing">待確認 ${counts.missing}</span>`);
+  if (counts.confirmed) chips.push(`<span class="miniStatus confirmed">已確認 ${counts.confirmed}</span>`);
+  return chips.join("");
+}
+
+function fieldStatusClass(status) {
+  return `field-${normalizeFieldStatus(status)}`;
+}
+
+function fieldStatusTitle(status) {
+  return {
+    read: "原文辨識：照片上直接看得到",
+    inferred: "AI 推算：由其他可讀資料計算或分類",
+    missing: "待確認：照片沒有或無法判讀",
+    confirmed: "已修改確認",
+  }[normalizeFieldStatus(status)] || "待確認";
+}
+
+function qualityLabel(quality) {
+  return { clear: "照片清楚", usable: "可用但需確認", difficult: "辨識困難" }[normalizeQuality(quality)];
 }
 
 function addReceiptAnalysisToStaged() {
@@ -420,7 +575,7 @@ function addReceiptAnalysisToStaged() {
   const date = $("receiptDate").value;
   const supplier = $("receiptSupplier").value.trim();
   if (!date || !supplier) {
-    showNotice("請確認日期與供應商都有填寫。", "warn");
+    showNotice("日期與供應商是建檔必要欄位；紅色欄位請先補齊。", "warn");
     return;
   }
 
@@ -430,26 +585,56 @@ function addReceiptAnalysisToStaged() {
     return;
   }
 
-  const records = validItems.map((item) => ({
-    date: normalizeDate(date),
-    supplier,
-    name: item.name.trim(),
-    category: item.category.trim() || "未分類",
-    spec: item.spec.trim(),
-    qty: toNumber(item.qty) || 1,
-    unit: item.unit.trim(),
-    price: toNumber(item.price),
-    amount: toNumber(item.amount) || roundMoney(toNumber(item.qty) * toNumber(item.price)),
-    note: [item.note, receiptAnalysis.invoiceNumber ? `單號：${receiptAnalysis.invoiceNumber}` : ""].filter(Boolean).join("；"),
-  }));
+  const noAmountItems = validItems.filter((item) => toNumber(item.amount) <= 0 && !(toNumber(item.qty) > 0 && toNumber(item.price) > 0));
+  if (noAmountItems.length) {
+    showNotice(`有 ${noAmountItems.length} 個品項沒有可用金額，請先填寫金額，或同時填寫數量與單價。`, "warn");
+    return;
+  }
+
+  const records = validItems.map((item) => {
+    const computedAmount = toNumber(item.amount) || roundMoney(toNumber(item.qty) * toNumber(item.price));
+    const aiNote = buildAiAuditNote(item);
+    return {
+      date: normalizeDate(date),
+      supplier,
+      name: item.name.trim(),
+      category: item.category.trim() || "未分類",
+      spec: item.spec.trim(),
+      qty: toNumber(item.qty),
+      unit: item.unit.trim(),
+      price: toNumber(item.price),
+      amount: computedAmount,
+      note: [
+        item.note,
+        receiptAnalysis.invoiceNumber ? `單號：${receiptAnalysis.invoiceNumber}` : "",
+        aiNote,
+      ].filter(Boolean).join("；"),
+    };
+  });
 
   stagedRecords.push(...records);
   saveStagedRecords();
   renderStagedRecords();
-  showNotice(`已把 ${records.length} 筆照片辨識資料加入待送清單。`);
+  showNotice(`已把 ${records.length} 筆 AI 轉換資料加入待送清單。`);
 
   const quickNav = document.querySelector('[data-view="quickEntry"]');
   if (quickNav) quickNav.click();
+}
+
+function buildAiAuditNote(item) {
+  const labels = { name: "品項", category: "分類", spec: "規格", qty: "數量", unit: "單位", price: "單價", amount: "金額" };
+  const inferred = [];
+  const missing = [];
+  Object.entries(item.fieldStatus || {}).forEach(([field, status]) => {
+    if (!labels[field]) return;
+    if (status === "inferred") inferred.push(labels[field]);
+    if (status === "missing") missing.push(labels[field]);
+  });
+  const parts = [];
+  if (inferred.length) parts.push(`AI推算：${inferred.join("、")}`);
+  if (missing.length) parts.push(`原單缺漏：${missing.join("、")}`);
+  if (item.originalLine) parts.push(`原文：${item.originalLine}`);
+  return parts.join("；");
 }
 
 function clearReceiptPhoto() {

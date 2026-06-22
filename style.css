@@ -341,3 +341,90 @@ tbody tr:hover { background: rgba(238,243,233,.48); }
   .receiptHeaderFields { grid-template-columns: 1fr; }
   .photoDrop { min-height: 180px; }
 }
+
+
+/* AI 智慧轉換建檔 */
+.aiWorkflowNote {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -2px 0 14px;
+}
+.aiWorkflowNote span {
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 12px;
+}
+.aiWorkflowNote b { color: var(--deep); }
+.analysisBadges { display: flex; flex-wrap: wrap; gap: 7px; justify-content: flex-end; }
+.analysisBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #f1eee7;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+.analysisBadge.fast, .analysisBadge.quality-clear { background: #e8f4e7; color: #3e7046; }
+.analysisBadge.enhanced, .analysisBadge.quality-usable { background: #fff4d9; color: #8a6413; }
+.analysisBadge.quality-difficult { background: #ffe8e8; color: #a23f3f; }
+.receiptIssues {
+  margin-bottom: 13px;
+  padding: 12px 14px;
+  border: 1px solid #ead5a6;
+  border-radius: 13px;
+  background: #fff8e7;
+  color: #765915;
+  font-size: 13px;
+}
+.receiptIssues strong { display: block; margin-bottom: 5px; }
+.receiptIssues ul { margin: 0; padding-left: 19px; }
+.fieldHint { min-height: 16px; color: var(--muted); font-size: 11px; }
+.fieldLegend { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 10px; }
+.legendItem, .miniStatus {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+}
+.legendItem { padding: 5px 8px; }
+.miniStatus { padding: 3px 6px; }
+.legendItem.read, .miniStatus.read { background: #e8f4e7; color: #3e7046; }
+.legendItem.inferred, .miniStatus.inferred { background: #fff4d9; color: #8a6413; }
+.legendItem.missing, .miniStatus.missing { background: #ffe8e8; color: #a23f3f; }
+.legendItem.confirmed, .miniStatus.confirmed { background: #e7effa; color: #315d90; }
+.field-read { border-color: #9fc5a5 !important; background: #f8fcf7 !important; }
+.field-inferred { border-color: #e1bd65 !important; background: #fffbef !important; }
+.field-missing { border-color: #e0a1a1 !important; background: #fff5f5 !important; }
+.field-confirmed { border-color: #8db2da !important; background: #f3f8ff !important; }
+.itemStatusSummary { display: flex; flex-wrap: wrap; gap: 4px; min-width: 110px; }
+.lowConfidenceRow { background: rgba(255, 232, 232, .22); }
+.rawTextPanel {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: #faf8f2;
+}
+.rawTextPanel summary { padding: 11px 13px; cursor: pointer; color: var(--green-dark); font-weight: 800; }
+.rawTextPanel textarea {
+  min-height: 150px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 13px 13px;
+  background: #fff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+.receiptTable { min-width: 1240px; }
+
+@media (max-width: 680px) {
+  .analysisBadges { justify-content: flex-start; }
+  .aiWorkflowNote { display: grid; }
+}

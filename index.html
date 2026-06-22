@@ -210,11 +210,17 @@
     <section id="photoEntry" class="view">
       <div class="quickIntro photoIntro">
         <div>
-          <span class="eyebrow">AI 拍照建檔</span>
-          <h2>拍一張照片，自動拆出採購明細</h2>
-          <p>支援收據、發票、採購單與手寫單據；辨識後可先修改，再加入待送清單。</p>
+          <span class="eyebrow">AI 智慧轉換建檔</span>
+          <h2>不同格式也能讀，能辨識多少就先填多少</h2>
+          <p>支援發票、收據、採購單與手寫單。AI 會先抄錄可讀內容，再轉成 ERP 欄位；推算與缺漏資料會清楚標示。</p>
         </div>
         <div id="photoApiBadge" class="apiBadge">尚未連接 AI 辨識接口</div>
+      </div>
+
+      <div class="aiWorkflowNote">
+        <span><b>原文辨識</b>：照片上直接看得到</span>
+        <span><b>AI 推算</b>：由數量、單價、金額等可驗證資料計算</span>
+        <span><b>待確認</b>：照片沒有或無法判讀，保留空白</span>
       </div>
 
       <div class="photoGrid">
@@ -222,7 +228,7 @@
           <div class="panelHead">
             <div>
               <h2>1. 拍照或上傳</h2>
-              <p class="muted">請保持照片清楚、完整，避免反光與裁切。</p>
+              <p class="muted">格式不必固定；請盡量拍完整、對焦清楚並避免反光。</p>
             </div>
           </div>
 
@@ -242,7 +248,7 @@
           </div>
 
           <div class="formActions photoActions">
-            <button id="analyzeReceipt" class="button primary" type="button" disabled>AI 辨識照片</button>
+            <button id="analyzeReceipt" class="button primary" type="button" disabled>AI 智慧辨識</button>
             <button id="clearReceipt" class="button ghost" type="button" disabled>清除照片</button>
           </div>
           <p id="receiptAnalyzeStatus" class="photoStatus muted">尚未選擇照片</p>
@@ -251,24 +257,32 @@
         <div class="panel photoResultPanel">
           <div class="panelHead">
             <div>
-              <h2>2. 確認辨識結果</h2>
-              <p class="muted">每個欄位都能修改，確認後再加入待送清單。</p>
+              <h2>2. 確認 AI 轉換結果</h2>
+              <p class="muted">黃色是 AI 推算、紅色是待確認；修改後會標記為已確認。</p>
+            </div>
+            <div class="analysisBadges">
+              <span id="receiptModelBadge" class="analysisBadge">尚未辨識</span>
+              <span id="receiptQualityBadge" class="analysisBadge">品質未判定</span>
             </div>
           </div>
 
           <div id="receiptResultEmpty" class="empty photoEmpty">
-            上傳照片並完成 AI 辨識後，明細會顯示在這裡。
+            上傳照片並完成 AI 辨識後，可讀資料會顯示在這裡。
           </div>
 
           <div id="receiptResult" hidden>
+            <div id="receiptIssues" class="receiptIssues" hidden></div>
+
             <div class="receiptHeaderFields">
               <label>
                 <span>日期 *</span>
                 <input id="receiptDate" type="date">
+                <small id="receiptDateHint" class="fieldHint"></small>
               </label>
               <label>
                 <span>供應商 *</span>
                 <input id="receiptSupplier" type="text" list="supplierOptions" placeholder="供應商或店家名稱">
+                <small id="receiptSupplierHint" class="fieldHint"></small>
               </label>
               <div class="receiptTotalBox">
                 <span>單據總額</span>
@@ -282,6 +296,13 @@
               <span id="receiptNote" class="muted"></span>
             </div>
 
+            <div class="fieldLegend" aria-label="AI 欄位狀態說明">
+              <span class="legendItem read">原文辨識</span>
+              <span class="legendItem inferred">AI 推算</span>
+              <span class="legendItem missing">待確認</span>
+              <span class="legendItem confirmed">已修改確認</span>
+            </div>
+
             <div class="tableWrap receiptTableWrap">
               <table class="receiptTable">
                 <thead>
@@ -292,8 +313,9 @@
                     <th>數量</th>
                     <th>單位</th>
                     <th>單價</th>
-                    <th>金額</th>
+                    <th>金額 *</th>
                     <th>信心</th>
+                    <th>狀態</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -301,7 +323,13 @@
               </table>
             </div>
 
+            <details class="rawTextPanel">
+              <summary>查看 AI 從照片讀到的原始文字</summary>
+              <textarea id="receiptRawText" readonly placeholder="AI 讀到的原始文字會顯示在這裡"></textarea>
+            </details>
+
             <div class="formActions receiptResultActions">
+              <button id="addReceiptItem" class="button ghost" type="button">新增空白品項</button>
               <button id="addReceiptToStaged" class="button primary" type="button">加入待送清單</button>
               <button id="reanalyzeReceipt" class="button secondary" type="button">重新辨識</button>
             </div>
