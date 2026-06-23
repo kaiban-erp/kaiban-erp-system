@@ -231,6 +231,7 @@ function secureApiRequest(payload, options = {}) {
     };
 
     const onMessage = (event) => {
+      
       const data = event.data;
       if (!data || data.source !== API_MESSAGE_SOURCE || data.requestId !== requestId) return;
 
