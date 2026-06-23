@@ -487,3 +487,81 @@ tbody tr:hover { background: rgba(238,243,233,.48); }
 @media (max-width: 420px) {
   .supplierPriceRow { align-items: flex-start; }
 }
+
+
+/* ===== 私人登入與防窺視 ===== */
+.authLocked > .sidebar,
+.authLocked > main {
+  display: none !important;
+}
+
+.authGate {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at top left, rgba(216,121,63,.13), transparent 34%),
+    linear-gradient(145deg, #243b2b, #314d38 58%, #52745b);
+}
+
+.authGate[hidden] { display: none; }
+
+.loginCard {
+  width: min(100%, 430px);
+  padding: 34px;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 28px;
+  background: rgba(255,253,247,.97);
+  box-shadow: 0 28px 80px rgba(15,31,20,.32);
+  text-align: center;
+}
+
+.loginLogo {
+  width: 66px;
+  height: 66px;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 17px;
+  border-radius: 21px;
+  color: #fff;
+  background: var(--green-dark);
+  font-size: 30px;
+  font-weight: 800;
+}
+
+.loginEyebrow {
+  margin-bottom: 8px;
+  color: var(--orange);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .15em;
+}
+
+.loginCard h1 { margin-bottom: 10px; }
+.loginDescription { margin: 0 auto 24px; color: var(--muted); line-height: 1.65; }
+.loginForm { display: grid; gap: 10px; text-align: left; }
+.loginForm label { color: var(--muted); font-size: 13px; }
+.loginForm input {
+  width: 100%;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  outline: none;
+}
+.loginForm input:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(82,116,91,.12); }
+.loginForm .button { margin-top: 4px; padding: 13px 16px; }
+.loginError {
+  margin: 14px 0 0;
+  padding: 11px 12px;
+  border: 1px solid #e3baba;
+  border-radius: 12px;
+  color: #8d3535;
+  background: #fff0f0;
+  font-size: 13px;
+}
+.loginPrivacy { margin: 18px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.logoutAction { color: #ffd9c0; }

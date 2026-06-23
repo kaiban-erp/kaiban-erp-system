@@ -6,13 +6,12 @@
 // 4. 快速建檔 + Google Apps Script 寫入
 // =====================================================
 
-const PRODUCT_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vS6DeEloMgCjxhelHhJ53nBuz6ROEX13csDEZubiVkiz0Migol87Av33UT--i7r7ovTG8pxCkFVw_vo/pub?output=csv";
-const PURCHASE_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vS6DeEloMgCjxhelHhJ53nBuz6ROEX13csDEZubiVkiz0Migol87Av33UT--i7r7ovTG8pxCkFVw_vo/pub?gid=1520549665&single=true&output=csv";
-
 // 完成 Apps Script 部署後，把 /exec 網址貼在引號內。
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwlZ6wJFevpbijE8V76D-OEVYQZM7fveWRTlySROtMWSYeKEuEr1-WUrdtUJcUA-4Z2/exec";
 
 const STAGED_STORAGE_KEY = "kaiban-erp-staged-v2";
+const AUTH_TOKEN_KEY = "kaiban-erp-auth-token";
+const API_MESSAGE_SOURCE = "kaiban-erp-api";
 const $ = (id) => document.getElementById(id);
 
 let products = [];
@@ -22,6 +21,8 @@ let selectedMonth = "";
 let amountWasEdited = false;
 let receiptImagePayload = null;
 let receiptAnalysis = null;
+let authToken = sessionStorage.getItem(AUTH_TOKEN_KEY) || "";
+let authenticationReady = false;
 
 const pageDescriptions = {
   dashboard: "採購、食材、供應商與每月支出集中管理。",
@@ -60,6 +61,7 @@ const csvCell = (value) => {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
+  setupAuthentication();
   setupNavigation();
   setupSearch();
   setupMonthly();
@@ -69,8 +71,196 @@ document.addEventListener("DOMContentLoaded", () => {
   setDefaultEntryDate();
   updateApiBadge();
   renderStagedRecords();
-  loadData();
+  restoreAuthentication();
 });
+
+
+function setupAuthentication() {
+  $("loginForm").addEventListener("submit", handleLoginSubmit);
+  $("logoutButton").addEventListener("click", logoutErp);
+}
+
+async function restoreAuthentication() {
+  lockErp();
+  if (!authToken) return;
+
+  setLoginBusy(true, "正在驗證登入…");
+  try {
+    await secureApiRequest({ action: "validateSession" }, { includeToken: true, timeoutMs: 30000 });
+    unlockErp();
+    await loadData();
+  } catch (error) {
+    clearAuthentication();
+    showLoginError("登入已失效，請重新輸入密碼。");
+  } finally {
+    setLoginBusy(false);
+  }
+}
+
+async function handleLoginSubmit(event) {
+  event.preventDefault();
+  const password = $("loginPassword").value;
+  if (!password) return;
+
+  hideLoginError();
+  setLoginBusy(true, "登入驗證中…");
+
+  try {
+    const response = await secureApiRequest(
+      { action: "login", password: password },
+      { includeToken: false, timeoutMs: 30000 }
+    );
+
+    authToken = String(response.token || "");
+    if (!authToken) throw new Error("伺服器沒有回傳登入憑證");
+
+    sessionStorage.setItem(AUTH_TOKEN_KEY, authToken);
+    $("loginPassword").value = "";
+    unlockErp();
+    await loadData();
+  } catch (error) {
+    clearAuthentication();
+    showLoginError(error.message || "登入失敗");
+    $("loginPassword").focus();
+  } finally {
+    setLoginBusy(false);
+  }
+}
+
+function unlockErp() {
+  authenticationReady = true;
+  document.body.classList.remove("authLocked");
+  $("authGate").hidden = true;
+  updateApiBadge();
+}
+
+function lockErp() {
+  authenticationReady = false;
+  document.body.classList.add("authLocked");
+  $("authGate").hidden = false;
+  updateApiBadge();
+}
+
+function logoutErp() {
+  clearAuthentication();
+  products = [];
+  purchases = [];
+  lockErp();
+  $("loginPassword").value = "";
+  hideNotice();
+  setDataStatus("等待登入", "");
+  window.scrollTo({ top: 0 });
+  setTimeout(() => $("loginPassword").focus(), 50);
+}
+
+function clearAuthentication() {
+  authToken = "";
+  authenticationReady = false;
+  sessionStorage.removeItem(AUTH_TOKEN_KEY);
+}
+
+function setLoginBusy(isBusy, text = "登入 ERP") {
+  const button = $("loginButton");
+  button.disabled = isBusy;
+  button.textContent = isBusy ? text : "登入 ERP";
+  $("loginPassword").disabled = isBusy;
+}
+
+function showLoginError(message) {
+  const errorBox = $("loginError");
+  errorBox.textContent = message;
+  errorBox.hidden = false;
+}
+
+function hideLoginError() {
+  $("loginError").hidden = true;
+}
+
+function handleAuthenticationFailure(message) {
+  clearAuthentication();
+  lockErp();
+  showLoginError(message || "登入已失效，請重新輸入密碼。");
+  setTimeout(() => $("loginPassword").focus(), 50);
+}
+
+function secureApiRequest(payload, options = {}) {
+  if (!APPS_SCRIPT_URL || !APPS_SCRIPT_URL.includes("/exec")) {
+    return Promise.reject(new Error("尚未設定 Apps Script 網址"));
+  }
+
+  const requestId = `erp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  const includeToken = options.includeToken !== false;
+  const requestPayload = {
+    ...payload,
+    requestId,
+  };
+
+  if (includeToken) requestPayload.token = authToken;
+
+  return new Promise((resolve, reject) => {
+    const iframeName = `kaiban-api-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const iframe = document.createElement("iframe");
+    iframe.name = iframeName;
+    iframe.hidden = true;
+
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = APPS_SCRIPT_URL;
+    form.target = iframeName;
+    form.hidden = true;
+
+    const field = document.createElement("input");
+    field.type = "hidden";
+    field.name = "payload";
+    field.value = JSON.stringify(requestPayload);
+    form.appendChild(field);
+
+    let finished = false;
+    const cleanup = () => {
+      window.removeEventListener("message", onMessage);
+      form.remove();
+      iframe.remove();
+    };
+
+    const finish = (callback) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timeout);
+      cleanup();
+      callback();
+    };
+
+    const onMessage = (event) => {
+      if (event.source !== iframe.contentWindow) return;
+      const data = event.data;
+      if (!data || data.source !== API_MESSAGE_SOURCE || data.requestId !== requestId) return;
+
+      finish(() => {
+        if (data.ok) {
+          resolve(data);
+          return;
+        }
+
+        if (data.code === "AUTH_REQUIRED") {
+          handleAuthenticationFailure(data.error);
+        }
+        reject(new Error(data.error || "伺服器沒有完成要求"));
+      });
+    };
+
+    const timeout = setTimeout(() => {
+      finish(() => reject(new Error("連線逾時，請稍後再試")));
+    }, options.timeoutMs || 45000);
+
+    iframe.addEventListener("error", () => {
+      finish(() => reject(new Error("無法連線到 Apps Script")));
+    });
+
+    window.addEventListener("message", onMessage);
+    document.body.append(iframe, form);
+    form.submit();
+  });
+}
 
 function setupNavigation() {
   document.querySelectorAll(".nav").forEach((button) => {
@@ -94,7 +284,7 @@ function setupNavigation() {
     });
   });
 
-  $("reloadData").addEventListener("click", loadData);
+  $("reloadData").addEventListener("click", () => { if (authenticationReady) loadData(); });
 }
 
 function setupSearch() {
@@ -266,13 +456,11 @@ async function analyzeReceiptPhoto() {
   setReceiptStatus("AI 先快速讀取；遇到手寫、模糊或特殊格式時會自動加強辨識…", "loading");
 
   try {
-    const requestId = `receipt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const response = await postToAppsScriptForResult({
+    const response = await secureApiRequest({
       action: "analyzeReceipt",
-      requestId,
       mimeType: receiptImagePayload.mimeType,
       imageBase64: receiptImagePayload.imageBase64,
-    }, requestId);
+    }, { timeoutMs: 180000 });
 
     receiptAnalysis = normalizeReceiptAnalysis(response.result || {});
     renderReceiptAnalysis();
@@ -285,63 +473,6 @@ async function analyzeReceiptPhoto() {
   } finally {
     buttons.forEach((button) => { button.disabled = !receiptImagePayload; });
   }
-}
-
-function postToAppsScriptForResult(payload, requestId) {
-  return new Promise((resolve, reject) => {
-    const iframeName = `kaiban-ai-${Date.now()}`;
-    const iframe = document.createElement("iframe");
-    iframe.name = iframeName;
-    iframe.hidden = true;
-
-    const form = document.createElement("form");
-    form.method = "POST";
-    form.action = APPS_SCRIPT_URL;
-    form.target = iframeName;
-    form.hidden = true;
-
-    const field = document.createElement("input");
-    field.type = "hidden";
-    field.name = "payload";
-    field.value = JSON.stringify(payload);
-    form.appendChild(field);
-
-    let finished = false;
-    const cleanup = () => {
-      window.removeEventListener("message", onMessage);
-      form.remove();
-      iframe.remove();
-    };
-
-    const finish = (callback) => {
-      if (finished) return;
-      finished = true;
-      clearTimeout(timeout);
-      cleanup();
-      callback();
-    };
-
-    const onMessage = (event) => {
-      const data = event.data;
-      if (!data || data.source !== "kaiban-receipt-analyzer" || data.requestId !== requestId) return;
-      finish(() => {
-        if (data.ok) resolve(data);
-        else reject(new Error(data.error || "AI 沒有回傳結果"));
-      });
-    };
-
-    const timeout = setTimeout(() => {
-      finish(() => reject(new Error("辨識逾時，請重新拍照再試一次")));
-    }, 180000);
-
-    iframe.addEventListener("error", () => {
-      finish(() => reject(new Error("無法連線到 Apps Script")));
-    });
-
-    window.addEventListener("message", onMessage);
-    document.body.append(iframe, form);
-    form.submit();
-  });
 }
 
 function normalizeReceiptAnalysis(result) {
@@ -682,53 +813,37 @@ function setupExports() {
 }
 
 async function loadData() {
-  setDataStatus("資料讀取中", "");
+  if (!authenticationReady || !authToken) return;
+
+  setDataStatus("私人資料讀取中", "");
   showLoading();
 
-  const [productResult, purchaseResult] = await Promise.allSettled([
-    fetchCSV(PRODUCT_CSV_URL),
-    fetchCSV(PURCHASE_CSV_URL),
-  ]);
+  try {
+    const response = await secureApiRequest({ action: "readData" }, { timeoutMs: 60000 });
+    const result = response.result || {};
+    const productRows = Array.isArray(result.products) ? result.products : [];
+    const purchaseRows = Array.isArray(result.purchases) ? result.purchases : [];
 
-  let productRows = [];
-  let purchaseRows = [];
-  let usedFallback = false;
+    purchases = purchaseRows
+      .filter((row) => row && (row["品項"] || row.name))
+      .map((row, index) => normalizePurchase(row, index));
 
-  if (productResult.status === "fulfilled") {
-    productRows = parseCSV(productResult.value).filter((row) => row["品項"]);
-  }
+    products = productRows.length
+      ? productRows.filter((row) => row && row["品項"]).map(normalizeProduct)
+      : deriveProductsFromPurchases(purchases);
 
-  if (purchaseResult.status === "fulfilled") {
-    purchaseRows = parseCSV(purchaseResult.value).filter((row) => row["品項"]);
-  }
-
-  if (purchaseRows.length) {
-    purchases = purchaseRows.map((row, index) => normalizePurchase(row, index));
-  } else {
-    purchases = getFallbackPurchases();
-    usedFallback = purchases.length > 0;
-  }
-
-  if (productRows.length) {
-    products = productRows.map(normalizeProduct);
-  } else {
-    products = deriveProductsFromPurchases(purchases);
-  }
-
-  setInitialMonth();
-  render();
-  populateDataLists();
-
-  if (purchases.length) {
-    setDataStatus(usedFallback ? "備援資料已載入" : "Google Sheet 已同步", "ok");
-    if (usedFallback) {
-      showNotice("Google Sheet CSV 暫時無法讀取，目前先使用 data.js 備援資料。", "warn");
-    } else {
-      hideNotice();
-    }
-  } else {
-    setDataStatus("尚無採購資料", "error");
-    showNotice("目前沒有讀到採購資料，請確認 Google Sheet 已發布為 CSV，或保留原本的 data.js。", "error");
+    setInitialMonth(true);
+    render();
+    populateDataLists();
+    setDataStatus("私人 Google Sheet 已同步", "ok");
+    hideNotice();
+  } catch (error) {
+    if (!authenticationReady) return;
+    products = [];
+    purchases = [];
+    render();
+    setDataStatus("資料讀取失敗", "error");
+    showNotice(`私人資料讀取失敗：${error.message}`, "error");
   }
 }
 
@@ -1427,89 +1542,34 @@ function renderStagedRecords() {
 
 async function submitStagedRecords() {
   if (!stagedRecords.length) return;
-
-  if (!APPS_SCRIPT_URL || !APPS_SCRIPT_URL.includes("/exec")) {
-    downloadPurchasesCsv(stagedRecords, "開拌_待匯入採購.csv");
-    showNotice("尚未設定 Apps Script 網址，因此先下載備份 CSV。請依 Code.gs 步驟部署後，把 /exec 網址貼進 app.js。", "warn");
+  if (!authenticationReady || !authToken) {
+    handleAuthenticationFailure("請先登入後再寫入資料。");
     return;
   }
 
   const button = $("submitStaged");
   const originalText = button.textContent;
   button.disabled = true;
-  button.textContent = "寫入中…";
+  button.textContent = "安全寫入中…";
 
   try {
-    await postToAppsScript({ records: stagedRecords });
-    const submitted = [...stagedRecords];
+    const submittedCount = stagedRecords.length;
+    await secureApiRequest({
+      action: "writePurchases",
+      records: stagedRecords,
+    }, { timeoutMs: 60000 });
+
     stagedRecords = [];
     saveStagedRecords();
     renderStagedRecords();
-
-    // 讓畫面立刻看得到新資料；正式資料仍以 Google Sheet 為準。
-    purchases.push(...submitted);
-    products = deriveProductsFromPurchases(purchases);
-    setInitialMonth(true);
-    render();
-    populateDataLists();
-    showNotice(`已送出 ${submitted.length} 筆到 Google Sheet。CSV 更新可能稍有延遲，可稍後按「重新讀取資料」。`);
+    await loadData();
+    showNotice(`已安全寫入 ${submittedCount} 筆到私人 Google Sheet。`);
   } catch (error) {
-    showNotice(`寫入失敗：${error.message}`, "error");
+    if (authenticationReady) showNotice(`寫入失敗：${error.message}`, "error");
   } finally {
     button.disabled = !stagedRecords.length;
     button.textContent = originalText;
   }
-}
-
-function postToAppsScript(payload) {
-  return new Promise((resolve, reject) => {
-    const iframeName = `kaiban-submit-${Date.now()}`;
-    const iframe = document.createElement("iframe");
-    iframe.name = iframeName;
-    iframe.hidden = true;
-
-    const form = document.createElement("form");
-    form.method = "POST";
-    form.action = APPS_SCRIPT_URL;
-    form.target = iframeName;
-    form.hidden = true;
-
-    const field = document.createElement("input");
-    field.type = "hidden";
-    field.name = "payload";
-    field.value = JSON.stringify(payload);
-    form.appendChild(field);
-
-    let submitted = false;
-    const cleanup = () => {
-      setTimeout(() => {
-        form.remove();
-        iframe.remove();
-      }, 500);
-    };
-
-    iframe.addEventListener("load", () => {
-      if (!submitted) return;
-      cleanup();
-      resolve();
-    });
-
-    iframe.addEventListener("error", () => {
-      cleanup();
-      reject(new Error("無法連線到 Apps Script"));
-    });
-
-    document.body.append(iframe, form);
-    submitted = true;
-    form.submit();
-
-    setTimeout(() => {
-      if (document.body.contains(iframe)) {
-        cleanup();
-        resolve();
-      }
-    }, 8000);
-  });
 }
 
 function clearStagedRecords() {
@@ -1647,11 +1707,12 @@ function setDefaultEntryDate() {
 }
 
 function updateApiBadge() {
-  const connected = Boolean(APPS_SCRIPT_URL && APPS_SCRIPT_URL.includes("/exec"));
-  $("apiBadge").textContent = connected ? "Google Sheet 寫入已連接" : "尚未連接寫入接口";
+  const configured = Boolean(APPS_SCRIPT_URL && APPS_SCRIPT_URL.includes("/exec"));
+  const connected = configured && authenticationReady && Boolean(authToken);
+  $("apiBadge").textContent = connected ? "私人 Google Sheet 已連接" : "登入後連接私人資料";
   $("apiBadge").classList.toggle("connected", connected);
   if ($("photoApiBadge")) {
-    $("photoApiBadge").textContent = connected ? "Gemini AI 已連接" : "尚未連接 AI 辨識接口";
+    $("photoApiBadge").textContent = connected ? "Gemini AI 安全連接" : "登入後啟用 AI 辨識";
     $("photoApiBadge").classList.toggle("connected", connected);
   }
 }

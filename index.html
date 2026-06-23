@@ -4,10 +4,28 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#314d38">
+  <meta name="robots" content="noindex, nofollow, noarchive, nosnippet">
+  <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet">
+  <meta name="referrer" content="no-referrer">
   <title>KaiBan ERP 2.0</title>
-  <link rel="stylesheet" href="style.css?v=20260622-price-compare-2">
+  <link rel="stylesheet" href="style.css?v=20260623-secure-1">
 </head>
-<body>
+<body class="authLocked">
+  <section id="authGate" class="authGate" aria-labelledby="loginTitle">
+    <div class="loginCard">
+      <div class="loginLogo">拌</div>
+      <p class="loginEyebrow">KAI BAN PRIVATE ERP</p>
+      <h1 id="loginTitle">開拌內部系統</h1>
+      <p class="loginDescription">此頁面僅供授權人員使用。請輸入共用密碼後繼續。</p>
+      <form id="loginForm" class="loginForm">
+        <label for="loginPassword">登入密碼</label>
+        <input id="loginPassword" type="password" autocomplete="current-password" required autofocus>
+        <button id="loginButton" class="button primary" type="submit">登入 ERP</button>
+      </form>
+      <p id="loginError" class="loginError" role="alert" hidden></p>
+      <p class="loginPrivacy">資料由私人 Google Sheet 讀取，登入工作階段約 6 小時。</p>
+    </div>
+  </section>
   <aside class="sidebar">
     <div class="brand">
       <div class="logo">拌</div>
@@ -30,6 +48,7 @@
     <div class="sidebarFoot">
       <span id="dataStatus" class="statusDot">資料準備中</span>
       <button id="reloadData" class="sideAction" type="button">重新讀取資料</button>
+      <button id="logoutButton" class="sideAction logoutAction" type="button">登出</button>
     </div>
   </aside>
 
@@ -483,8 +502,6 @@
     <option value="g"></option>
     <option value="筆"></option>
   </datalist>
-
-  <script src="data.js"></script>
-  <script src="app.js?v=20260622-price-compare-2"></script>
+  <script src="app.js?v=20260623-secure-1"></script>
 </body>
 </html>
