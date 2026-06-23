@@ -6,6 +6,12 @@
 // 4. 快速建檔 + Google Apps Script 寫入
 // =====================================================
 
+<<<<<<< HEAD
+=======
+const PRODUCT_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vS6DeEloMgCjxhelHhJ53nBuz6ROEX13csDEZubiVkiz0Migol87Av33UT--i7r7ovTG8pxCkFVw_vo/pub?gid=0&single=true&output=csv";
+const PURCHASE_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vS6DeEloMgCjxhelHhJ53nBuz6ROEX13csDEZubiVkiz0Migol87Av33UT--i7r7ovTG8pxCkFVw_vo/pub?gid=1520549665&single=true&output=csv";
+
+>>>>>>> 5e25244 (更新 CSV 網址)
 // 完成 Apps Script 部署後，把 /exec 網址貼在引號內。
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwlZ6wJFevpbijE8V76D-OEVYQZM7fveWRTlySROtMWSYeKEuEr1-WUrdtUJcUA-4Z2/exec";
 
