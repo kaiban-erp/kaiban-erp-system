@@ -6,13 +6,12 @@
 // 4. 快速建檔 + Google Apps Script 寫入
 // =====================================================
 
-const PRODUCT_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vS6DeEloMgCjxhelHhJ53nBuz6ROEX13csDEZubiVkiz0Migol87Av33UT--i7r7ovTG8pxCkFVw_vo/pub?output=csv";
-const PURCHASE_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vS6DeEloMgCjxhelHhJ53nBuz6ROEX13csDEZubiVkiz0Migol87Av33UT--i7r7ovTG8pxCkFVw_vo/pub?gid=1520549665&single=true&output=csv";
-
 // 完成 Apps Script 部署後，把 /exec 網址貼在引號內。
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwlZ6wJFevpbijE8V76D-OEVYQZM7fveWRTlySROtMWSYeKEuEr1-WUrdtUJcUA-4Z2/exec";
 
 const STAGED_STORAGE_KEY = "kaiban-erp-staged-v2";
+const AUTH_TOKEN_KEY = "kaiban-erp-auth-token";
+const API_MESSAGE_SOURCE = "kaiban-erp-api";
 const $ = (id) => document.getElementById(id);
 
 let products = [];
@@ -20,12 +19,17 @@ let purchases = [];
 let stagedRecords = loadStagedRecords();
 let selectedMonth = "";
 let amountWasEdited = false;
+let receiptImagePayload = null;
+let receiptAnalysis = null;
+let authToken = sessionStorage.getItem(AUTH_TOKEN_KEY) || "";
+let authenticationReady = false;
 
 const pageDescriptions = {
   dashboard: "採購、食材、供應商與每月支出集中管理。",
   foods: "搜尋品項並比較歷史價格。",
   purchases: "查看所有採購明細與匯出資料。",
   monthly: "依月份分析總支出、供應商與品項分類。",
+  photoEntry: "拍照辨識收據、發票或採購單，確認後快速建檔。",
   quickEntry: "逐筆輸入或批次貼上，快速累積採購資料庫。",
   suppliers: "查看各供應商累計採購金額與品項數。",
 };
@@ -57,16 +61,206 @@ const csvCell = (value) => {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
+  setupAuthentication();
   setupNavigation();
   setupSearch();
   setupMonthly();
   setupQuickEntry();
+  setupPhotoEntry();
   setupExports();
   setDefaultEntryDate();
   updateApiBadge();
   renderStagedRecords();
-  loadData();
+  restoreAuthentication();
 });
+
+
+function setupAuthentication() {
+  $("loginForm").addEventListener("submit", handleLoginSubmit);
+  $("logoutButton").addEventListener("click", logoutErp);
+}
+
+async function restoreAuthentication() {
+  lockErp();
+  if (!authToken) return;
+
+  setLoginBusy(true, "正在驗證登入…");
+  try {
+    await secureApiRequest({ action: "validateSession" }, { includeToken: true, timeoutMs: 30000 });
+    unlockErp();
+    await loadData();
+  } catch (error) {
+    clearAuthentication();
+    showLoginError("登入已失效，請重新輸入密碼。");
+  } finally {
+    setLoginBusy(false);
+  }
+}
+
+async function handleLoginSubmit(event) {
+  event.preventDefault();
+  const password = $("loginPassword").value;
+  if (!password) return;
+
+  hideLoginError();
+  setLoginBusy(true, "登入驗證中…");
+
+  try {
+    const response = await secureApiRequest(
+      { action: "login", password: password },
+      { includeToken: false, timeoutMs: 30000 }
+    );
+
+    authToken = String(response.token || "");
+    if (!authToken) throw new Error("伺服器沒有回傳登入憑證");
+
+    sessionStorage.setItem(AUTH_TOKEN_KEY, authToken);
+    $("loginPassword").value = "";
+    unlockErp();
+    await loadData();
+  } catch (error) {
+    clearAuthentication();
+    showLoginError(error.message || "登入失敗");
+    $("loginPassword").focus();
+  } finally {
+    setLoginBusy(false);
+  }
+}
+
+function unlockErp() {
+  authenticationReady = true;
+  document.body.classList.remove("authLocked");
+  $("authGate").hidden = true;
+  updateApiBadge();
+}
+
+function lockErp() {
+  authenticationReady = false;
+  document.body.classList.add("authLocked");
+  $("authGate").hidden = false;
+  updateApiBadge();
+}
+
+function logoutErp() {
+  clearAuthentication();
+  products = [];
+  purchases = [];
+  lockErp();
+  $("loginPassword").value = "";
+  hideNotice();
+  setDataStatus("等待登入", "");
+  window.scrollTo({ top: 0 });
+  setTimeout(() => $("loginPassword").focus(), 50);
+}
+
+function clearAuthentication() {
+  authToken = "";
+  authenticationReady = false;
+  sessionStorage.removeItem(AUTH_TOKEN_KEY);
+}
+
+function setLoginBusy(isBusy, text = "登入 ERP") {
+  const button = $("loginButton");
+  button.disabled = isBusy;
+  button.textContent = isBusy ? text : "登入 ERP";
+  $("loginPassword").disabled = isBusy;
+}
+
+function showLoginError(message) {
+  const errorBox = $("loginError");
+  errorBox.textContent = message;
+  errorBox.hidden = false;
+}
+
+function hideLoginError() {
+  $("loginError").hidden = true;
+}
+
+function handleAuthenticationFailure(message) {
+  clearAuthentication();
+  lockErp();
+  showLoginError(message || "登入已失效，請重新輸入密碼。");
+  setTimeout(() => $("loginPassword").focus(), 50);
+}
+
+function secureApiRequest(payload, options = {}) {
+  if (!APPS_SCRIPT_URL || !APPS_SCRIPT_URL.includes("/exec")) {
+    return Promise.reject(new Error("尚未設定 Apps Script 網址"));
+  }
+
+  const requestId = `erp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  const includeToken = options.includeToken !== false;
+  const requestPayload = {
+    ...payload,
+    requestId,
+  };
+
+  if (includeToken) requestPayload.token = authToken;
+
+  return new Promise((resolve, reject) => {
+    const iframeName = `kaiban-api-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const iframe = document.createElement("iframe");
+    iframe.name = iframeName;
+    iframe.hidden = true;
+
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = APPS_SCRIPT_URL;
+    form.target = iframeName;
+    form.hidden = true;
+
+    const field = document.createElement("input");
+    field.type = "hidden";
+    field.name = "payload";
+    field.value = JSON.stringify(requestPayload);
+    form.appendChild(field);
+
+    let finished = false;
+    const cleanup = () => {
+      window.removeEventListener("message", onMessage);
+      form.remove();
+      iframe.remove();
+    };
+
+    const finish = (callback) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timeout);
+      cleanup();
+      callback();
+    };
+
+    const onMessage = (event) => {
+      if (event.source !== iframe.contentWindow) return;
+      const data = event.data;
+      if (!data || data.source !== API_MESSAGE_SOURCE || data.requestId !== requestId) return;
+
+      finish(() => {
+        if (data.ok) {
+          resolve(data);
+          return;
+        }
+
+        if (data.code === "AUTH_REQUIRED") {
+          handleAuthenticationFailure(data.error);
+        }
+        reject(new Error(data.error || "伺服器沒有完成要求"));
+      });
+    };
+
+    const timeout = setTimeout(() => {
+      finish(() => reject(new Error("連線逾時，請稍後再試")));
+    }, options.timeoutMs || 45000);
+
+    iframe.addEventListener("error", () => {
+      finish(() => reject(new Error("無法連線到 Apps Script")));
+    });
+
+    window.addEventListener("message", onMessage);
+    document.body.append(iframe, form);
+    form.submit();
+  });
+}
 
 function setupNavigation() {
   document.querySelectorAll(".nav").forEach((button) => {
@@ -81,15 +275,16 @@ function setupNavigation() {
 
       $("pageTitle").textContent = button.dataset.title || button.textContent.trim();
       $("pageDescription").textContent = pageDescriptions[viewId] || "";
-      $("globalSearch").style.display = viewId === "quickEntry" ? "none" : "block";
+      $("globalSearch").style.display = ["quickEntry", "photoEntry"].includes(viewId) ? "none" : "block";
 
       if (viewId === "monthly") renderMonthly();
       if (viewId === "quickEntry") renderStagedRecords();
+      if (viewId === "photoEntry") renderReceiptAnalysis();
       window.scrollTo({ top: 0, behavior: "smooth" });
     });
   });
 
-  $("reloadData").addEventListener("click", loadData);
+  $("reloadData").addEventListener("click", () => { if (authenticationReady) loadData(); });
 }
 
 function setupSearch() {
@@ -135,6 +330,480 @@ function setupQuickEntry() {
   });
 }
 
+
+function setupPhotoEntry() {
+  const fileInput = $("receiptFile");
+  const analyzeButton = $("analyzeReceipt");
+  const clearButton = $("clearReceipt");
+  const reanalyzeButton = $("reanalyzeReceipt");
+  const addButton = $("addReceiptToStaged");
+  const addItemButton = $("addReceiptItem");
+
+  fileInput.addEventListener("change", async (event) => {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      showNotice("請選擇照片檔案。", "error");
+      fileInput.value = "";
+      return;
+    }
+
+    setReceiptStatus("正在處理照片…");
+    analyzeButton.disabled = true;
+    clearButton.disabled = true;
+
+    try {
+      receiptImagePayload = await compressReceiptImage(file);
+      $("receiptPreview").src = receiptImagePayload.dataUrl;
+      $("receiptFileName").textContent = file.name || "現場拍照";
+      $("receiptFileSize").textContent = formatFileSize(receiptImagePayload.bytes);
+      $("receiptPreviewWrap").hidden = false;
+      analyzeButton.disabled = false;
+      clearButton.disabled = false;
+      setReceiptStatus("照片已準備完成，請按「AI 智慧辨識」。", "ready");
+    } catch (error) {
+      clearReceiptPhoto();
+      showNotice(`照片處理失敗：${error.message}`, "error");
+    }
+  });
+
+  analyzeButton.addEventListener("click", analyzeReceiptPhoto);
+  reanalyzeButton.addEventListener("click", analyzeReceiptPhoto);
+  clearButton.addEventListener("click", clearReceiptPhoto);
+  addButton.addEventListener("click", addReceiptAnalysisToStaged);
+  addItemButton.addEventListener("click", addBlankReceiptItem);
+
+  $("receiptDate").addEventListener("input", (event) => {
+    if (!receiptAnalysis) return;
+    receiptAnalysis.date = event.target.value;
+    receiptAnalysis.dateStatus = "confirmed";
+    applyReceiptHeaderStatus();
+  });
+
+  $("receiptSupplier").addEventListener("input", (event) => {
+    if (!receiptAnalysis) return;
+    receiptAnalysis.supplier = event.target.value;
+    receiptAnalysis.supplierStatus = "confirmed";
+    applyReceiptHeaderStatus();
+  });
+
+  $("receiptRows").addEventListener("input", handleReceiptRowInput);
+  $("receiptRows").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-receipt-remove]");
+    if (!button || !receiptAnalysis) return;
+    const index = Number(button.dataset.receiptRemove);
+    receiptAnalysis.items.splice(index, 1);
+    renderReceiptAnalysis();
+  });
+}
+
+async function compressReceiptImage(file) {
+  const dataUrl = await readFileAsDataUrl(file);
+  const image = await loadImage(dataUrl);
+  const maxSide = 1600;
+  const scale = Math.min(1, maxSide / Math.max(image.naturalWidth || image.width, image.naturalHeight || image.height));
+  const width = Math.max(1, Math.round((image.naturalWidth || image.width) * scale));
+  const height = Math.max(1, Math.round((image.naturalHeight || image.height) * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { alpha: false });
+  context.fillStyle = "#fff";
+  context.fillRect(0, 0, width, height);
+  context.drawImage(image, 0, 0, width, height);
+  const outputDataUrl = canvas.toDataURL("image/jpeg", 0.82);
+  const base64 = outputDataUrl.split(",")[1] || "";
+  return {
+    dataUrl: outputDataUrl,
+    imageBase64: base64,
+    mimeType: "image/jpeg",
+    bytes: Math.round(base64.length * 0.75),
+  };
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("無法讀取照片"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("瀏覽器無法開啟這張照片，請改用 JPG 或 PNG"));
+    image.src = src;
+  });
+}
+
+async function analyzeReceiptPhoto() {
+  if (!receiptImagePayload) {
+    showNotice("請先拍照或選擇照片。", "warn");
+    return;
+  }
+
+  if (!APPS_SCRIPT_URL || !APPS_SCRIPT_URL.includes("/exec")) {
+    showNotice("尚未設定 Apps Script 寫入網址。", "error");
+    return;
+  }
+
+  const buttons = [$("analyzeReceipt"), $("reanalyzeReceipt")];
+  buttons.forEach((button) => { button.disabled = true; });
+  setReceiptStatus("AI 先快速讀取；遇到手寫、模糊或特殊格式時會自動加強辨識…", "loading");
+
+  try {
+    const response = await secureApiRequest({
+      action: "analyzeReceipt",
+      mimeType: receiptImagePayload.mimeType,
+      imageBase64: receiptImagePayload.imageBase64,
+    }, { timeoutMs: 180000 });
+
+    receiptAnalysis = normalizeReceiptAnalysis(response.result || {});
+    renderReceiptAnalysis();
+    const modeText = receiptAnalysis.enhancedAnalysis ? "已使用加強辨識" : "快速辨識完成";
+    setReceiptStatus(`${modeText}，找到 ${receiptAnalysis.items.length} 個品項。`, "success");
+    showNotice("AI 已把可讀內容轉成 ERP 欄位。請優先檢查黃色推算欄位與紅色待確認欄位。");
+  } catch (error) {
+    setReceiptStatus("辨識失敗，請確認 Apps Script 已重新部署。", "error");
+    showNotice(`AI 辨識失敗：${error.message}`, "error");
+  } finally {
+    buttons.forEach((button) => { button.disabled = !receiptImagePayload; });
+  }
+}
+
+function normalizeReceiptAnalysis(result) {
+  return {
+    documentType: String(result.documentType || "單據"),
+    documentQuality: normalizeQuality(result.documentQuality),
+    isHandwritten: Boolean(result.isHandwritten),
+    modelUsed: String(result.modelUsed || ""),
+    enhancedAnalysis: Boolean(result.enhancedAnalysis),
+    date: dateToInputValue(result.date),
+    dateStatus: normalizeFieldStatus(result.dateStatus, result.date ? "read" : "missing"),
+    supplier: String(result.supplier || ""),
+    supplierStatus: normalizeFieldStatus(result.supplierStatus, result.supplier ? "read" : "missing"),
+    invoiceNumber: String(result.invoiceNumber || ""),
+    invoiceNumberStatus: normalizeFieldStatus(result.invoiceNumberStatus, result.invoiceNumber ? "read" : "missing"),
+    total: toNumber(result.total),
+    totalStatus: normalizeFieldStatus(result.totalStatus, toNumber(result.total) > 0 ? "read" : "missing"),
+    note: String(result.note || ""),
+    rawText: String(result.rawText || ""),
+    issues: Array.isArray(result.issues) ? result.issues.map(String).filter(Boolean) : [],
+    items: Array.isArray(result.items) ? result.items.map((item) => normalizeReceiptItem(item)) : [],
+  };
+}
+
+function normalizeReceiptItem(item = {}) {
+  const qty = toNumber(item.qty);
+  const price = toNumber(item.price);
+  const amount = toNumber(item.amount);
+  const source = item.fieldStatus || {};
+  return {
+    name: String(item.name || ""),
+    category: String(item.category || "未分類"),
+    spec: String(item.spec || ""),
+    qty,
+    unit: String(item.unit || ""),
+    price,
+    amount,
+    note: String(item.note || ""),
+    originalLine: String(item.originalLine || ""),
+    confidence: Math.max(0, Math.min(1, toNumber(item.confidence))),
+    reviewReasons: Array.isArray(item.reviewReasons) ? item.reviewReasons.map(String).filter(Boolean) : [],
+    fieldStatus: {
+      name: normalizeFieldStatus(source.name, item.name ? "read" : "missing"),
+      category: normalizeFieldStatus(source.category, item.category ? "inferred" : "missing"),
+      spec: normalizeFieldStatus(source.spec, item.spec ? "read" : "missing"),
+      qty: normalizeFieldStatus(source.qty, qty > 0 ? "read" : "missing"),
+      unit: normalizeFieldStatus(source.unit, item.unit ? "read" : "missing"),
+      price: normalizeFieldStatus(source.price, price > 0 ? "read" : "missing"),
+      amount: normalizeFieldStatus(source.amount, amount > 0 ? "read" : "missing"),
+      note: normalizeFieldStatus(source.note, item.note ? "read" : "missing"),
+    },
+  };
+}
+
+function normalizeFieldStatus(value, fallback = "missing") {
+  const status = String(value || "").toLowerCase();
+  return ["read", "inferred", "missing", "confirmed"].includes(status) ? status : fallback;
+}
+
+function normalizeQuality(value) {
+  const quality = String(value || "").toLowerCase();
+  return ["clear", "usable", "difficult"].includes(quality) ? quality : "usable";
+}
+
+function renderReceiptAnalysis() {
+  const empty = $("receiptResultEmpty");
+  const result = $("receiptResult");
+  if (!receiptAnalysis) {
+    empty.hidden = false;
+    result.hidden = true;
+    $("receiptModelBadge").textContent = "尚未辨識";
+    $("receiptQualityBadge").textContent = "品質未判定";
+    return;
+  }
+
+  empty.hidden = true;
+  result.hidden = false;
+  $("receiptDate").value = receiptAnalysis.date || "";
+  $("receiptSupplier").value = receiptAnalysis.supplier || "";
+  $("receiptDocumentType").textContent = receiptAnalysis.documentType || "單據";
+  $("receiptInvoiceNumber").textContent = receiptAnalysis.invoiceNumber ? `單號：${receiptAnalysis.invoiceNumber}` : "";
+  $("receiptNote").textContent = receiptAnalysis.note || "";
+  $("receiptRawText").value = receiptAnalysis.rawText || "";
+
+  $("receiptModelBadge").textContent = receiptAnalysis.enhancedAnalysis ? "加強辨識" : "快速辨識";
+  $("receiptModelBadge").className = `analysisBadge ${receiptAnalysis.enhancedAnalysis ? "enhanced" : "fast"}`;
+  $("receiptQualityBadge").textContent = qualityLabel(receiptAnalysis.documentQuality);
+  $("receiptQualityBadge").className = `analysisBadge quality-${receiptAnalysis.documentQuality}`;
+  applyReceiptHeaderStatus();
+  renderReceiptIssues();
+
+  const computedTotal = receiptAnalysis.items.reduce((sum, item) => sum + toNumber(item.amount), 0);
+  $("receiptTotal").textContent = money(receiptAnalysis.total || computedTotal);
+
+  $("receiptRows").innerHTML = receiptAnalysis.items.length
+    ? receiptAnalysis.items.map((item, index) => renderReceiptItemRow(item, index)).join("")
+    : '<tr><td colspan="10" class="empty">沒有辨識到品項。可按「新增空白品項」手動補入，或換一張更清楚的照片。</td></tr>';
+
+  $("addReceiptToStaged").disabled = !receiptAnalysis.items.length;
+}
+
+function renderReceiptItemRow(item, index) {
+  const status = item.fieldStatus || {};
+  return `
+    <tr data-receipt-index="${index}" class="${item.confidence < 0.55 ? "lowConfidenceRow" : ""}">
+      <td><input class="tableInput itemName ${fieldStatusClass(status.name)}" title="${fieldStatusTitle(status.name)}" data-receipt-field="name" value="${escapeHTML(item.name)}" placeholder="品項"></td>
+      <td><input class="tableInput ${fieldStatusClass(status.category)}" title="${fieldStatusTitle(status.category)}" data-receipt-field="category" value="${escapeHTML(item.category)}" list="categoryOptions"></td>
+      <td><input class="tableInput ${fieldStatusClass(status.spec)}" title="${fieldStatusTitle(status.spec)}" data-receipt-field="spec" value="${escapeHTML(item.spec)}"></td>
+      <td><input class="tableInput numberInput ${fieldStatusClass(status.qty)}" title="${fieldStatusTitle(status.qty)}" data-receipt-field="qty" type="number" min="0" step="0.01" value="${displayNumberInput(item.qty)}"></td>
+      <td><input class="tableInput unitInput ${fieldStatusClass(status.unit)}" title="${fieldStatusTitle(status.unit)}" data-receipt-field="unit" value="${escapeHTML(item.unit)}" list="unitOptions"></td>
+      <td><input class="tableInput numberInput ${fieldStatusClass(status.price)}" title="${fieldStatusTitle(status.price)}" data-receipt-field="price" type="number" min="0" step="0.01" value="${displayNumberInput(item.price)}"></td>
+      <td><input class="tableInput numberInput ${fieldStatusClass(status.amount)}" title="${fieldStatusTitle(status.amount)}" data-receipt-field="amount" type="number" min="0" step="0.01" value="${displayNumberInput(item.amount)}"></td>
+      <td><span class="confidence ${confidenceClass(item.confidence)}">${Math.round(item.confidence * 100)}%</span></td>
+      <td><div class="itemStatusSummary" title="${escapeHTML(item.reviewReasons.join("；") || item.originalLine)}">${renderItemStatusSummary(item)}</div></td>
+      <td><button class="removeRow" type="button" data-receipt-remove="${index}">刪除</button></td>
+    </tr>`;
+}
+
+function displayNumberInput(value) {
+  const number = toNumber(value);
+  return number > 0 ? number : "";
+}
+
+function handleReceiptRowInput(event) {
+  const input = event.target.closest("[data-receipt-field]");
+  const row = event.target.closest("[data-receipt-index]");
+  if (!input || !row || !receiptAnalysis) return;
+  const index = Number(row.dataset.receiptIndex);
+  const item = receiptAnalysis.items[index];
+  if (!item) return;
+  const field = input.dataset.receiptField;
+  item[field] = ["qty", "price", "amount"].includes(field) ? toNumber(input.value) : input.value;
+  item.fieldStatus[field] = "confirmed";
+  input.classList.remove("field-read", "field-inferred", "field-missing");
+  input.classList.add("field-confirmed");
+  input.title = fieldStatusTitle("confirmed");
+
+  if (["qty", "price"].includes(field) && item.qty > 0 && item.price > 0) {
+    item.amount = roundMoney(item.qty * item.price);
+    item.fieldStatus.amount = "confirmed";
+    const amountInput = row.querySelector('[data-receipt-field="amount"]');
+    if (amountInput) {
+      amountInput.value = item.amount;
+      amountInput.classList.remove("field-read", "field-inferred", "field-missing");
+      amountInput.classList.add("field-confirmed");
+      amountInput.title = fieldStatusTitle("confirmed");
+    }
+  }
+
+  const summary = row.querySelector(".itemStatusSummary");
+  if (summary) summary.innerHTML = renderItemStatusSummary(item);
+  const total = receiptAnalysis.items.reduce((sum, current) => sum + toNumber(current.amount), 0);
+  $("receiptTotal").textContent = money(total);
+}
+
+function addBlankReceiptItem() {
+  if (!receiptAnalysis) {
+    receiptAnalysis = normalizeReceiptAnalysis({});
+  }
+  receiptAnalysis.items.push(normalizeReceiptItem({
+    category: "未分類",
+    confidence: 0,
+    fieldStatus: {
+      name: "missing", category: "missing", spec: "missing", qty: "missing",
+      unit: "missing", price: "missing", amount: "missing", note: "missing",
+    },
+    reviewReasons: ["人工新增，請確認所有欄位"],
+  }));
+  renderReceiptAnalysis();
+}
+
+function applyReceiptHeaderStatus() {
+  if (!receiptAnalysis) return;
+  applyStatusToInput($("receiptDate"), receiptAnalysis.dateStatus);
+  applyStatusToInput($("receiptSupplier"), receiptAnalysis.supplierStatus);
+  $("receiptDateHint").textContent = fieldStatusTitle(receiptAnalysis.dateStatus);
+  $("receiptSupplierHint").textContent = fieldStatusTitle(receiptAnalysis.supplierStatus);
+}
+
+function applyStatusToInput(input, status) {
+  if (!input) return;
+  input.classList.remove("field-read", "field-inferred", "field-missing", "field-confirmed");
+  input.classList.add(fieldStatusClass(status));
+  input.title = fieldStatusTitle(status);
+}
+
+function renderReceiptIssues() {
+  const box = $("receiptIssues");
+  if (!receiptAnalysis || !receiptAnalysis.issues.length) {
+    box.hidden = true;
+    box.innerHTML = "";
+    return;
+  }
+  box.hidden = false;
+  box.innerHTML = `<strong>需要留意</strong><ul>${receiptAnalysis.issues.map((issue) => `<li>${escapeHTML(issue)}</li>`).join("")}</ul>`;
+}
+
+function renderItemStatusSummary(item) {
+  const values = Object.values(item.fieldStatus || {});
+  const counts = values.reduce((result, value) => {
+    result[value] = (result[value] || 0) + 1;
+    return result;
+  }, {});
+  const chips = [];
+  if (counts.read) chips.push(`<span class="miniStatus read">原文 ${counts.read}</span>`);
+  if (counts.inferred) chips.push(`<span class="miniStatus inferred">推算 ${counts.inferred}</span>`);
+  if (counts.missing) chips.push(`<span class="miniStatus missing">待確認 ${counts.missing}</span>`);
+  if (counts.confirmed) chips.push(`<span class="miniStatus confirmed">已確認 ${counts.confirmed}</span>`);
+  return chips.join("");
+}
+
+function fieldStatusClass(status) {
+  return `field-${normalizeFieldStatus(status)}`;
+}
+
+function fieldStatusTitle(status) {
+  return {
+    read: "原文辨識：照片上直接看得到",
+    inferred: "AI 推算：由其他可讀資料計算或分類",
+    missing: "待確認：照片沒有或無法判讀",
+    confirmed: "已修改確認",
+  }[normalizeFieldStatus(status)] || "待確認";
+}
+
+function qualityLabel(quality) {
+  return { clear: "照片清楚", usable: "可用但需確認", difficult: "辨識困難" }[normalizeQuality(quality)];
+}
+
+function addReceiptAnalysisToStaged() {
+  if (!receiptAnalysis || !receiptAnalysis.items.length) return;
+  const date = $("receiptDate").value;
+  const supplier = $("receiptSupplier").value.trim();
+  if (!date || !supplier) {
+    showNotice("日期與供應商是建檔必要欄位；紅色欄位請先補齊。", "warn");
+    return;
+  }
+
+  const validItems = receiptAnalysis.items.filter((item) => item.name.trim());
+  if (!validItems.length) {
+    showNotice("至少要有一個品項名稱。", "warn");
+    return;
+  }
+
+  const noAmountItems = validItems.filter((item) => toNumber(item.amount) <= 0 && !(toNumber(item.qty) > 0 && toNumber(item.price) > 0));
+  if (noAmountItems.length) {
+    showNotice(`有 ${noAmountItems.length} 個品項沒有可用金額，請先填寫金額，或同時填寫數量與單價。`, "warn");
+    return;
+  }
+
+  const records = validItems.map((item) => {
+    const computedAmount = toNumber(item.amount) || roundMoney(toNumber(item.qty) * toNumber(item.price));
+    const aiNote = buildAiAuditNote(item);
+    return {
+      date: normalizeDate(date),
+      supplier,
+      name: item.name.trim(),
+      category: item.category.trim() || "未分類",
+      spec: item.spec.trim(),
+      qty: toNumber(item.qty),
+      unit: item.unit.trim(),
+      price: toNumber(item.price),
+      amount: computedAmount,
+      note: [
+        item.note,
+        receiptAnalysis.invoiceNumber ? `單號：${receiptAnalysis.invoiceNumber}` : "",
+        aiNote,
+      ].filter(Boolean).join("；"),
+    };
+  });
+
+  stagedRecords.push(...records);
+  saveStagedRecords();
+  renderStagedRecords();
+  showNotice(`已把 ${records.length} 筆 AI 轉換資料加入待送清單。`);
+
+  const quickNav = document.querySelector('[data-view="quickEntry"]');
+  if (quickNav) quickNav.click();
+}
+
+function buildAiAuditNote(item) {
+  const labels = { name: "品項", category: "分類", spec: "規格", qty: "數量", unit: "單位", price: "單價", amount: "金額" };
+  const inferred = [];
+  const missing = [];
+  Object.entries(item.fieldStatus || {}).forEach(([field, status]) => {
+    if (!labels[field]) return;
+    if (status === "inferred") inferred.push(labels[field]);
+    if (status === "missing") missing.push(labels[field]);
+  });
+  const parts = [];
+  if (inferred.length) parts.push(`AI推算：${inferred.join("、")}`);
+  if (missing.length) parts.push(`原單缺漏：${missing.join("、")}`);
+  if (item.originalLine) parts.push(`原文：${item.originalLine}`);
+  return parts.join("；");
+}
+
+function clearReceiptPhoto() {
+  receiptImagePayload = null;
+  receiptAnalysis = null;
+  $("receiptFile").value = "";
+  $("receiptPreview").removeAttribute("src");
+  $("receiptPreviewWrap").hidden = true;
+  $("analyzeReceipt").disabled = true;
+  $("clearReceipt").disabled = true;
+  setReceiptStatus("尚未選擇照片");
+  renderReceiptAnalysis();
+}
+
+function dateToInputValue(value) {
+  const match = String(value || "").match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (!match) return "";
+  return `${match[1]}-${String(match[2]).padStart(2, "0")}-${String(match[3]).padStart(2, "0")}`;
+}
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function confidenceClass(value) {
+  if (value >= 0.8) return "high";
+  if (value >= 0.55) return "medium";
+  return "low";
+}
+
+function setReceiptStatus(message, type = "") {
+  const status = $("receiptAnalyzeStatus");
+  status.textContent = message;
+  status.className = `photoStatus muted ${type}`.trim();
+}
+
 function setupExports() {
   $("exportAllCsv").addEventListener("click", () => downloadPurchasesCsv(getFilteredPurchases(), "開拌_全部採購紀錄.csv"));
   $("exportMonthCsv").addEventListener("click", () => {
@@ -144,53 +813,37 @@ function setupExports() {
 }
 
 async function loadData() {
-  setDataStatus("資料讀取中", "");
+  if (!authenticationReady || !authToken) return;
+
+  setDataStatus("私人資料讀取中", "");
   showLoading();
 
-  const [productResult, purchaseResult] = await Promise.allSettled([
-    fetchCSV(PRODUCT_CSV_URL),
-    fetchCSV(PURCHASE_CSV_URL),
-  ]);
+  try {
+    const response = await secureApiRequest({ action: "readData" }, { timeoutMs: 60000 });
+    const result = response.result || {};
+    const productRows = Array.isArray(result.products) ? result.products : [];
+    const purchaseRows = Array.isArray(result.purchases) ? result.purchases : [];
 
-  let productRows = [];
-  let purchaseRows = [];
-  let usedFallback = false;
+    purchases = purchaseRows
+      .filter((row) => row && (row["品項"] || row.name))
+      .map((row, index) => normalizePurchase(row, index));
 
-  if (productResult.status === "fulfilled") {
-    productRows = parseCSV(productResult.value).filter((row) => row["品項"]);
-  }
+    products = productRows.length
+      ? productRows.filter((row) => row && row["品項"]).map(normalizeProduct)
+      : deriveProductsFromPurchases(purchases);
 
-  if (purchaseResult.status === "fulfilled") {
-    purchaseRows = parseCSV(purchaseResult.value).filter((row) => row["品項"]);
-  }
-
-  if (purchaseRows.length) {
-    purchases = purchaseRows.map(normalizePurchase);
-  } else {
-    purchases = getFallbackPurchases();
-    usedFallback = purchases.length > 0;
-  }
-
-  if (productRows.length) {
-    products = productRows.map(normalizeProduct);
-  } else {
-    products = deriveProductsFromPurchases(purchases);
-  }
-
-  setInitialMonth();
-  render();
-  populateDataLists();
-
-  if (purchases.length) {
-    setDataStatus(usedFallback ? "備援資料已載入" : "Google Sheet 已同步", "ok");
-    if (usedFallback) {
-      showNotice("Google Sheet CSV 暫時無法讀取，目前先使用 data.js 備援資料。", "warn");
-    } else {
-      hideNotice();
-    }
-  } else {
-    setDataStatus("尚無採購資料", "error");
-    showNotice("目前沒有讀到採購資料，請確認 Google Sheet 已發布為 CSV，或保留原本的 data.js。", "error");
+    setInitialMonth(true);
+    render();
+    populateDataLists();
+    setDataStatus("私人 Google Sheet 已同步", "ok");
+    hideNotice();
+  } catch (error) {
+    if (!authenticationReady) return;
+    products = [];
+    purchases = [];
+    render();
+    setDataStatus("資料讀取失敗", "error");
+    showNotice(`私人資料讀取失敗：${error.message}`, "error");
   }
 }
 
@@ -279,7 +932,7 @@ function normalizeProduct(row) {
   };
 }
 
-function normalizePurchase(row) {
+function normalizePurchase(row, sourceIndex = 0) {
   const qty = toNumber(row["數量"] ?? row.qty);
   const price = toNumber(row["單價"] ?? row.unitPrice ?? row.price);
   const amount = toNumber(row["金額"] ?? row["小計"] ?? row.total ?? row.amount) || qty * price;
@@ -295,12 +948,13 @@ function normalizePurchase(row) {
     price,
     amount,
     note: row["備註"] ?? row.note ?? "",
+    sourceIndex,
   };
 }
 
 function getFallbackPurchases() {
   const source = Array.isArray(window.KAIBAN_PURCHASES) ? window.KAIBAN_PURCHASES : [];
-  return source.filter((row) => row && (row.name || row["品項"])).map(normalizePurchase);
+  return source.filter((row) => row && (row.name || row["品項"])).map((row, index) => normalizePurchase(row, index));
 }
 
 function deriveProductsFromPurchases(list) {
@@ -427,47 +1081,188 @@ function renderProductCards(list) {
 
   $("foodCards").innerHTML = list.map((product) => {
     const priceStats = getProductPriceStats(product);
+    const change = priceStats.change;
+    const changeClass = change.direction === "up"
+      ? "priceUp"
+      : change.direction === "down"
+        ? "priceDown"
+        : "priceFlat";
+
+    const changeText = change.hasPrevious
+      ? `${change.direction === "up" ? "↑" : change.direction === "down" ? "↓" : "—"} 較上次 ${signedMoney(change.amount)}（${signedPercent(change.percent)}）`
+      : "首次價格紀錄";
+
+    const supplierRows = priceStats.suppliers.map((supplier, index) => `
+      <div class="supplierPriceRow ${index === 0 ? "isCheapest" : ""}">
+        <div>
+          <strong>${escapeHTML(supplier.name)}</strong>
+          <small>最近 ${escapeHTML(supplier.latestDate || "—")}｜歷史最低 ${money(supplier.minPrice)}</small>
+        </div>
+        <div class="supplierPriceValue">
+          <strong>${money(supplier.latestPrice)}</strong>
+          <small>/ ${escapeHTML(product.unit || "單位")}</small>
+        </div>
+      </div>
+    `).join("");
+
     return `
-      <article class="foodCard">
-        <span class="tag">${escapeHTML(product.category || "未分類")}</span>
-        <span class="tag">${escapeHTML(product.supplier || "未填供應商")}</span>
+      <article class="foodCard priceCompareCard">
+        <div class="cardTags">
+          <span class="tag">${escapeHTML(product.category || "未分類")}</span>
+          <span class="tag">最新：${escapeHTML(priceStats.latestSupplier || product.supplier || "未填供應商")}</span>
+        </div>
         <h3>${escapeHTML(product.name)}</h3>
         <div class="price">${money(priceStats.latest)} <small>/ ${escapeHTML(product.unit || "單位")}</small></div>
-        <div class="meta">
-          <span class="label">ERP 代碼</span><span>${escapeHTML(product.code || "—")}</span>
-          <span class="label">規格</span><span>${escapeHTML(product.spec || "—")}</span>
-          <span class="label">最低價</span><span>${money(priceStats.min)}</span>
-          <span class="label">最高價</span><span>${money(priceStats.max)}</span>
-          <span class="label">平均價</span><span>${money(priceStats.average)}</span>
-          <span class="label">最近採購</span><span>${escapeHTML(product.lastDate || "—")}</span>
-          <span class="label">備註</span><span>${escapeHTML(product.note || "—")}</span>
+        <div class="priceChange ${changeClass}">${changeText}</div>
+
+        <div class="bestBuyBox">
+          <span>歷史最便宜購買地</span>
+          <strong>${escapeHTML(priceStats.cheapestSupplier || "尚無資料")} · ${money(priceStats.min)} / ${escapeHTML(product.unit || "單位")}</strong>
+          <small>${escapeHTML(priceStats.cheapestDate || "—")}</small>
         </div>
+
+        <div class="meta compactMeta">
+          <span class="label">目前較便宜</span><span>${escapeHTML(priceStats.currentCheapestSupplier || "—")} · ${money(priceStats.currentCheapestPrice)}</span>
+          <span class="label">上次價格</span><span>${change.hasPrevious ? money(change.previous) : "—"}</span>
+          <span class="label">平均價格</span><span>${money(priceStats.average)}</span>
+          <span class="label">最近採購</span><span>${escapeHTML(priceStats.latestDate || product.lastDate || "—")}</span>
+          <span class="label">規格</span><span>${escapeHTML(product.spec || "—")}</span>
+          <span class="label">ERP 代碼</span><span>${escapeHTML(product.code || "—")}</span>
+        </div>
+
+        ${priceStats.suppliers.length ? `
+          <details class="supplierCompare">
+            <summary>查看供應商價格比較（${priceStats.suppliers.length}）</summary>
+            <div class="supplierCompareList">${supplierRows}</div>
+          </details>
+        ` : ""}
+
+        ${priceStats.mixedFormat ? '<p class="compareWarning">部分紀錄的規格或單位不同，請確認後再比較。</p>' : ""}
       </article>
     `;
   }).join("");
 }
 
 function getProductPriceStats(product) {
-  const matching = purchases.filter((purchase) => norm(purchase.name) === norm(product.name) && purchase.price > 0);
+  const sameName = purchases.filter((purchase) =>
+    norm(purchase.name) === norm(product.name) && purchase.price > 0
+  );
+
+  const productSpec = norm(product.spec);
+  const productUnit = norm(product.unit);
+  const exactMatching = sameName.filter((purchase) => {
+    const purchaseSpec = norm(purchase.spec);
+    const purchaseUnit = norm(purchase.unit);
+    const specMatches = !productSpec || !purchaseSpec || productSpec === purchaseSpec;
+    const unitMatches = !productUnit || !purchaseUnit || productUnit === purchaseUnit;
+    return specMatches && unitMatches;
+  });
+
+  const matching = exactMatching.length ? exactMatching : sameName;
+  const sorted = [...matching].sort(comparePurchaseNewestFirst);
+  const latestPurchase = sorted[0];
+  const previousPurchase = sorted[1];
   const prices = matching.map((purchase) => purchase.price);
-  const latestPurchase = [...matching].sort((a, b) => compareDate(b.date, a.date))[0];
 
   if (!prices.length) {
     const latest = product.price || 0;
     return {
       latest,
+      latestSupplier: product.supplier || "",
+      latestDate: product.lastDate || "",
       min: product.minPrice || latest,
       max: product.maxPrice || latest,
       average: product.avgPrice || latest,
+      cheapestSupplier: product.supplier || "",
+      cheapestDate: product.lastDate || "",
+      currentCheapestSupplier: product.supplier || "",
+      currentCheapestPrice: latest,
+      suppliers: [],
+      mixedFormat: false,
+      change: {
+        hasPrevious: false,
+        previous: 0,
+        amount: 0,
+        percent: 0,
+        direction: "flat",
+      },
     };
   }
 
+  const cheapestPurchase = [...matching].sort((a, b) => {
+    if (a.price !== b.price) return a.price - b.price;
+    return comparePurchaseNewestFirst(a, b);
+  })[0];
+
+  const supplierMap = new Map();
+  matching.forEach((purchase) => {
+    const supplierName = purchase.supplier || "未填供應商";
+    if (!supplierMap.has(supplierName)) supplierMap.set(supplierName, []);
+    supplierMap.get(supplierName).push(purchase);
+  });
+
+  const suppliers = [...supplierMap.entries()].map(([name, supplierPurchases]) => {
+    const supplierSorted = [...supplierPurchases].sort(comparePurchaseNewestFirst);
+    const supplierPrices = supplierPurchases.map((purchase) => purchase.price);
+    return {
+      name,
+      latestPrice: supplierSorted[0]?.price || 0,
+      latestDate: supplierSorted[0]?.date || "",
+      minPrice: Math.min(...supplierPrices),
+      averagePrice: supplierPrices.reduce((sum, price) => sum + price, 0) / supplierPrices.length,
+      count: supplierPurchases.length,
+    };
+  }).sort((a, b) => {
+    if (a.latestPrice !== b.latestPrice) return a.latestPrice - b.latestPrice;
+    return compareDate(b.latestDate, a.latestDate);
+  });
+
+  const latest = latestPurchase?.price || product.price || 0;
+  const previous = previousPurchase?.price || 0;
+  const changeAmount = previousPurchase ? latest - previous : 0;
+  const changePercent = previousPurchase && previous > 0 ? (changeAmount / previous) * 100 : 0;
+
+  const formatKeys = new Set(matching.map((purchase) => `${norm(purchase.spec)}|${norm(purchase.unit)}`));
+
   return {
-    latest: latestPurchase?.price || product.price || 0,
+    latest,
+    latestSupplier: latestPurchase?.supplier || product.supplier || "",
+    latestDate: latestPurchase?.date || product.lastDate || "",
     min: Math.min(...prices),
     max: Math.max(...prices),
     average: prices.reduce((sum, price) => sum + price, 0) / prices.length,
+    cheapestSupplier: cheapestPurchase?.supplier || "",
+    cheapestDate: cheapestPurchase?.date || "",
+    currentCheapestSupplier: suppliers[0]?.name || "",
+    currentCheapestPrice: suppliers[0]?.latestPrice || 0,
+    suppliers,
+    mixedFormat: formatKeys.size > 1,
+    change: {
+      hasPrevious: Boolean(previousPurchase),
+      previous,
+      amount: changeAmount,
+      percent: changePercent,
+      direction: changeAmount > 0 ? "up" : changeAmount < 0 ? "down" : "flat",
+    },
   };
+}
+
+function comparePurchaseNewestFirst(a, b) {
+  const dateCompare = compareDate(b.date, a.date);
+  if (dateCompare !== 0) return dateCompare;
+  return (b.sourceIndex || 0) - (a.sourceIndex || 0);
+}
+
+function signedMoney(value) {
+  const number = toNumber(value);
+  if (number === 0) return "$0";
+  return `${number > 0 ? "+" : "−"}${money(Math.abs(number))}`;
+}
+
+function signedPercent(value) {
+  const number = Number(value) || 0;
+  if (number === 0) return "0%";
+  return `${number > 0 ? "+" : "−"}${Math.abs(number).toLocaleString("zh-TW", { maximumFractionDigits: 1 })}%`;
 }
 
 function renderPurchaseRows(list) {
@@ -747,52 +1542,34 @@ function renderStagedRecords() {
 
 async function submitStagedRecords() {
   if (!stagedRecords.length) return;
-
-  if (!APPS_SCRIPT_URL || !APPS_SCRIPT_URL.includes("/exec")) {
-    downloadPurchasesCsv(stagedRecords, "開拌_待匯入採購.csv");
-    showNotice("尚未設定 Apps Script 網址，因此先下載備份 CSV。請依 Code.gs 步驟部署後，把 /exec 網址貼進 app.js。", "warn");
+  if (!authenticationReady || !authToken) {
+    handleAuthenticationFailure("請先登入後再寫入資料。");
     return;
   }
 
   const button = $("submitStaged");
   const originalText = button.textContent;
   button.disabled = true;
-  button.textContent = "寫入中…";
+  button.textContent = "安全寫入中…";
 
   try {
-    await postToAppsScript({ records: stagedRecords });
-    const submitted = [...stagedRecords];
+    const submittedCount = stagedRecords.length;
+    await secureApiRequest({
+      action: "writePurchases",
+      records: stagedRecords,
+    }, { timeoutMs: 60000 });
+
     stagedRecords = [];
     saveStagedRecords();
     renderStagedRecords();
-
-    // 讓畫面立刻看得到新資料；正式資料仍以 Google Sheet 為準。
-    purchases.push(...submitted);
-    products = deriveProductsFromPurchases(purchases);
-    setInitialMonth(true);
-    render();
-    populateDataLists();
-    showNotice(`已送出 ${submitted.length} 筆到 Google Sheet。CSV 更新可能稍有延遲，可稍後按「重新讀取資料」。`);
+    await loadData();
+    showNotice(`已安全寫入 ${submittedCount} 筆到私人 Google Sheet。`);
   } catch (error) {
-    showNotice(`寫入失敗：${error.message}`, "error");
+    if (authenticationReady) showNotice(`寫入失敗：${error.message}`, "error");
   } finally {
     button.disabled = !stagedRecords.length;
     button.textContent = originalText;
   }
-}
-
-function postToAppsScript(payload) {
-  const body = new URLSearchParams();
-  body.set("payload", JSON.stringify(payload));
-
-  return fetch(APPS_SCRIPT_URL, {
-    method: "POST",
-    mode: "no-cors",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-    },
-    body: body.toString(),
-  });
 }
 
 function clearStagedRecords() {
@@ -930,9 +1707,14 @@ function setDefaultEntryDate() {
 }
 
 function updateApiBadge() {
-  const connected = Boolean(APPS_SCRIPT_URL && APPS_SCRIPT_URL.includes("/exec"));
-  $("apiBadge").textContent = connected ? "Google Sheet 寫入已連接" : "尚未連接寫入接口";
+  const configured = Boolean(APPS_SCRIPT_URL && APPS_SCRIPT_URL.includes("/exec"));
+  const connected = configured && authenticationReady && Boolean(authToken);
+  $("apiBadge").textContent = connected ? "私人 Google Sheet 已連接" : "登入後連接私人資料";
   $("apiBadge").classList.toggle("connected", connected);
+  if ($("photoApiBadge")) {
+    $("photoApiBadge").textContent = connected ? "Gemini AI 安全連接" : "登入後啟用 AI 辨識";
+    $("photoApiBadge").classList.toggle("connected", connected);
+  }
 }
 
 function setDataStatus(text, type) {
