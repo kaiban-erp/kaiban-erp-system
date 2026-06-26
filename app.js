@@ -231,7 +231,6 @@ function secureApiRequest(payload, options = {}) {
     };
 
     const onMessage = (event) => {
-      
       const data = event.data;
       if (!data || data.source !== API_MESSAGE_SOURCE || data.requestId !== requestId) return;
 
@@ -314,6 +313,17 @@ function setupQuickEntry() {
   $("entryPrice").addEventListener("input", calculateEntryAmount);
   $("entryAmount").addEventListener("input", () => { amountWasEdited = true; });
   $("resetQuickForm").addEventListener("click", () => resetQuickForm());
+
+  const searchImagesButton = $("searchImagesButton");
+  const closeImageSearch = $("closeImageSearch");
+
+  if (searchImagesButton) {
+    searchImagesButton.addEventListener("click", searchQuickEntryImages);
+  }
+
+  if (closeImageSearch) {
+    closeImageSearch.addEventListener("click", closeQuickEntryImageSearch);
+  }
   $("parseBulk").addEventListener("click", parseBulkPaste);
   $("downloadTemplate").addEventListener("click", downloadTemplate);
   $("downloadStaged").addEventListener("click", () => downloadPurchasesCsv(stagedRecords, "開拌_待匯入採購.csv"));
@@ -328,6 +338,123 @@ function setupQuickEntry() {
     saveStagedRecords();
     renderStagedRecords();
   });
+}
+
+
+async function searchQuickEntryImages() {
+  const query = $("entryName").value.trim();
+  const button = $("searchImagesButton");
+  const panel = $("imageSearchPanel");
+  const status = $("imageSearchStatus");
+  const results = $("imageSearchResults");
+
+  if (!query) {
+    showNotice("請先輸入品項名稱，再使用 AI 找圖。", "warn");
+    $("entryName").focus();
+    return;
+  }
+
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = "搜尋中…";
+  panel.hidden = false;
+  status.className = "imageSearchStatus";
+  status.textContent = `正在搜尋「${query}」的圖片…`;
+  results.replaceChildren();
+
+  try {
+    const response = await secureApiRequest(
+      { action: "searchImages", query },
+      { timeoutMs: 45000 }
+    );
+
+    const images = response?.result && Array.isArray(response.result.images)
+      ? response.result.images
+      : [];
+
+    renderImageSearchResults(images, query);
+  } catch (error) {
+    status.className = "imageSearchStatus error";
+    status.textContent = `找圖失敗：${error?.message || "未知錯誤"}`;
+    results.replaceChildren();
+  } finally {
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
+function renderImageSearchResults(images, query) {
+  const panel = $("imageSearchPanel");
+  const status = $("imageSearchStatus");
+  const results = $("imageSearchResults");
+
+  panel.hidden = false;
+  results.replaceChildren();
+
+  const validImages = images
+    .map((item) => ({
+      title: String(item?.title || query),
+      link: getSafeHttpUrl(item?.link),
+      thumbnailLink: getSafeHttpUrl(item?.thumbnailLink || item?.link),
+    }))
+    .filter((item) => item.link && item.thumbnailLink)
+    .slice(0, 3);
+
+  if (!validImages.length) {
+    status.className = "imageSearchStatus";
+    status.textContent = `找不到「${query}」可使用的圖片。`;
+    return;
+  }
+
+  status.className = "imageSearchStatus";
+  status.textContent = "請點擊一張圖片作為品項圖片。";
+
+  validImages.forEach((item, index) => {
+    const choice = document.createElement("button");
+    choice.type = "button";
+    choice.className = "imageSearchChoice";
+    choice.title = item.title || `圖片 ${index + 1}`;
+
+    const image = document.createElement("img");
+    image.src = item.thumbnailLink;
+    image.alt = item.title || `${query} 圖片 ${index + 1}`;
+    image.loading = "lazy";
+    image.referrerPolicy = "no-referrer";
+
+    image.addEventListener("error", () => {
+      choice.remove();
+      if (!results.children.length) {
+        status.textContent = "圖片來源無法載入，請重新搜尋。";
+      }
+    });
+
+    choice.appendChild(image);
+    choice.addEventListener("click", () => {
+      $("entryImageUrl").value = item.link;
+      panel.hidden = true;
+      showNotice(`已為「${query}」選擇圖片。`);
+    });
+
+    results.appendChild(choice);
+  });
+}
+
+function closeQuickEntryImageSearch() {
+  const panel = $("imageSearchPanel");
+  const results = $("imageSearchResults");
+  const status = $("imageSearchStatus");
+  if (panel) panel.hidden = true;
+  if (results) results.replaceChildren();
+  if (status) status.textContent = "";
+}
+
+function getSafeHttpUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return ["http:", "https:"].includes(url.protocol) ? url.href : "";
+  } catch (error) {
+    return "";
+  }
 }
 
 
@@ -929,6 +1056,7 @@ function normalizeProduct(row) {
     minPrice: toNumber(row["最低價"]),
     maxPrice: toNumber(row["最高價"]),
     avgPrice: toNumber(row["平均價"]),
+    imageUrl: row["圖片網址"] ?? row.imageUrl ?? "",
   };
 }
 
@@ -947,6 +1075,7 @@ function normalizePurchase(row, sourceIndex = 0) {
     unit: row["單位"] ?? row.unit ?? "",
     price,
     amount,
+    imageUrl: row["圖片網址"] ?? row.imageUrl ?? "",
     note: row["備註"] ?? row.note ?? "",
     sourceIndex,
   };
@@ -972,6 +1101,7 @@ function deriveProductsFromPurchases(list) {
         supplier: purchase.supplier,
         lastDate: purchase.date,
         note: purchase.note,
+        imageUrl: purchase.imageUrl || "",
         active: "TRUE",
         prices: [],
       });
@@ -985,6 +1115,7 @@ function deriveProductsFromPurchases(list) {
       group.supplier = purchase.supplier;
       group.category = purchase.category || group.category;
       group.note = purchase.note || group.note;
+      group.imageUrl = purchase.imageUrl || group.imageUrl;
     }
   });
 
@@ -1019,7 +1150,7 @@ function getFilteredPurchases() {
     const searchText = [
       purchase.date, purchase.supplier, purchase.name, purchase.category,
       purchase.spec, purchase.qty, purchase.unit, purchase.price,
-      purchase.amount, purchase.note,
+      purchase.amount, purchase.imageUrl, purchase.note,
     ].join(" ");
     return !keyword || norm(searchText).includes(keyword);
   });
@@ -1107,6 +1238,7 @@ function renderProductCards(list) {
 
     return `
       <article class="foodCard priceCompareCard">
+        ${getSafeHttpUrl(product.imageUrl) ? `<img class="foodCardImage" src="${escapeHTML(getSafeHttpUrl(product.imageUrl))}" alt="${escapeHTML(product.name)}" loading="lazy" referrerpolicy="no-referrer">` : ""}
         <div class="cardTags">
           <span class="tag">${escapeHTML(product.category || "未分類")}</span>
           <span class="tag">最新：${escapeHTML(priceStats.latestSupplier || product.supplier || "未填供應商")}</span>
@@ -1403,6 +1535,7 @@ function getQuickFormRecord() {
     unit: $("entryUnit").value.trim(),
     price: $("entryPrice").value,
     amount: $("entryAmount").value,
+    imageUrl: $("entryImageUrl").value.trim(),
     note: $("entryNote").value.trim(),
   });
 
@@ -1434,6 +1567,7 @@ function resetQuickForm(options = {}) {
   $("entrySupplier").value = supplier;
   $("entryQty").value = 1;
   $("entryAmount").value = "";
+  closeQuickEntryImageSearch();
   amountWasEdited = false;
 }
 
@@ -1470,7 +1604,7 @@ function parsePastedRows(text) {
 
   const first = matrix[0].map((cell) => String(cell).trim());
   const hasHeader = first.some((cell) => ["日期", "供應商", "品項", "分類", "數量", "單價", "金額"].includes(cell));
-  const headers = hasHeader ? first : ["日期", "供應商", "品項", "分類", "規格", "數量", "單位", "單價", "金額", "備註"];
+  const headers = hasHeader ? first : ["日期", "供應商", "品項", "分類", "規格", "數量", "單位", "單價", "金額", "圖片網址", "備註"];
   const body = hasHeader ? matrix.slice(1) : matrix;
 
   return body.map((values) => {
@@ -1595,7 +1729,7 @@ function saveStagedRecords() {
 }
 
 function downloadTemplate() {
-  const headers = ["日期", "供應商", "品項", "分類", "規格", "數量", "單位", "單價", "金額", "備註"];
+  const headers = ["日期", "供應商", "品項", "分類", "規格", "數量", "單位", "單價", "金額", "圖片網址", "備註"];
   downloadText(`${headers.join(",")}\n`, "開拌_採購匯入範本.csv", "text/csv;charset=utf-8");
 }
 
@@ -1605,13 +1739,13 @@ function downloadPurchasesCsv(list, filename) {
     return;
   }
 
-  const headers = ["日期", "供應商", "品項", "分類", "規格", "數量", "單位", "單價", "金額", "備註"];
+  const headers = ["日期", "供應商", "品項", "分類", "規格", "數量", "單位", "單價", "金額", "圖片網址", "備註"];
   const lines = [headers.join(",")];
   list.forEach((purchase) => {
     lines.push([
       purchase.date, purchase.supplier, purchase.name, purchase.category,
       purchase.spec, purchase.qty, purchase.unit, purchase.price,
-      purchase.amount, purchase.note,
+      purchase.amount, purchase.imageUrl, purchase.note,
     ].map(csvCell).join(","));
   });
   downloadText(`\uFEFF${lines.join("\r\n")}`, filename, "text/csv;charset=utf-8");

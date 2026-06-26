@@ -8,7 +8,7 @@
   <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet">
   <meta name="referrer" content="no-referrer">
   <title>KaiBan ERP 2.0</title>
-  <link rel="stylesheet" href="style.css?v=20260623-secure-1">
+  <link rel="stylesheet" href="style.css?v=20260626-ai-image-1">
 </head>
 <body class="authLocked">
   <section id="authGate" class="authGate" aria-labelledby="loginTitle">
@@ -385,9 +385,26 @@
               <span>供應商 *</span>
               <input id="entrySupplier" name="supplier" list="supplierOptions" required placeholder="例如：Costco">
             </label>
-            <label class="wide">
+            <div class="wide formField">
               <span>品項 *</span>
-              <input id="entryName" name="name" list="itemOptions" required placeholder="例如：原味嫩雞胸">
+              <div class="entryInputAction">
+                <input id="entryName" name="name" list="itemOptions" required placeholder="例如：原味嫩雞胸">
+                <button id="searchImagesButton" class="aiImageButton" type="button">✨ AI 找圖</button>
+              </div>
+
+              <div id="imageSearchPanel" class="imageSearchPanel" hidden>
+                <div class="imageSearchPanelHead">
+                  <strong>選擇一張品項圖片</strong>
+                  <button id="closeImageSearch" class="imageSearchClose" type="button" aria-label="關閉圖片搜尋結果">×</button>
+                </div>
+                <div id="imageSearchStatus" class="imageSearchStatus"></div>
+                <div id="imageSearchResults" class="imageSearchResults"></div>
+              </div>
+            </div>
+
+            <label class="wide">
+              <span>圖片網址</span>
+              <input id="entryImageUrl" name="imageUrl" type="text" readonly placeholder="選擇圖片後會自動填入">
             </label>
             <label>
               <span>分類</span>
@@ -502,6 +519,6 @@
     <option value="g"></option>
     <option value="筆"></option>
   </datalist>
-  <script src="app.js?v=secure-bridge-2"></script>
+  <script src="app.js?v=20260626-ai-image-1"></script>
 </body>
 </html>

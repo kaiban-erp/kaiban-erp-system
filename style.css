@@ -246,6 +246,165 @@ tbody tr:hover { background: rgba(238,243,233,.48); }
 .button.secondary { border: 1px solid #c9d8c7; background: var(--green-soft); color: var(--green-dark); }
 .button.ghost { border: 1px solid var(--line); background: #fff; color: var(--muted); }
 
+
+
+/* AI 圖片搜尋 */
+.formField {
+  display: grid;
+  gap: 6px;
+}
+
+.formField > span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.entryInputAction {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.entryInputAction input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.aiImageButton {
+  flex: 0 0 auto;
+  border: 1px solid rgba(216, 121, 63, 0.38);
+  border-radius: 12px;
+  padding: 0 14px;
+  background: #fff6ed;
+  color: var(--orange);
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform .15s ease, background .15s ease, box-shadow .15s ease;
+}
+
+.aiImageButton:hover {
+  transform: translateY(-1px);
+  background: #ffecda;
+  box-shadow: 0 5px 14px rgba(216, 121, 63, .15);
+}
+
+.aiImageButton:disabled {
+  cursor: wait;
+  opacity: .6;
+  transform: none;
+  box-shadow: none;
+}
+
+.imageSearchPanel {
+  margin-top: 4px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fffdf8;
+  box-shadow: var(--shadow);
+}
+
+.imageSearchPanelHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.imageSearchClose {
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: #f3ede2;
+  color: var(--muted);
+  font-size: 21px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.imageSearchStatus {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.imageSearchStatus.error {
+  color: var(--danger);
+}
+
+.imageSearchResults {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.imageSearchChoice {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border: 2px solid transparent;
+  border-radius: 14px;
+  padding: 0;
+  background: #f3eee4;
+  cursor: pointer;
+  aspect-ratio: 1 / 1;
+  transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease;
+}
+
+.imageSearchChoice:hover,
+.imageSearchChoice:focus-visible {
+  transform: translateY(-2px);
+  border-color: var(--orange);
+  box-shadow: 0 8px 18px rgba(36, 48, 38, .13);
+  outline: none;
+}
+
+.imageSearchChoice img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.imageSearchChoice::after {
+  content: "點擊選擇";
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: rgba(36, 48, 38, .78);
+  color: #fff;
+  font-size: 11px;
+}
+
+.foodCardImage {
+  width: 100%;
+  height: 170px;
+  display: block;
+  margin-bottom: 12px;
+  border-radius: 15px;
+  object-fit: cover;
+  background: #f2ecdf;
+}
+
+@media (max-width: 680px) {
+  .entryInputAction {
+    flex-direction: column;
+  }
+
+  .aiImageButton {
+    min-height: 42px;
+  }
+
+  .imageSearchResults {
+    grid-template-columns: repeat(3, minmax(80px, 1fr));
+  }
+}
+
 @media (max-width: 1180px) {
   .dashboardCards { grid-template-columns: repeat(3, minmax(150px, 1fr)); }
   .quickGrid { grid-template-columns: 1fr; }
