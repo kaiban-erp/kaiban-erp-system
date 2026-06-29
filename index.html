@@ -1,524 +1,439 @@
-<!doctype html>
+<!DOCTYPE html>
+
 <html lang="zh-Hant">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#314d38">
-  <meta name="robots" content="noindex, nofollow, noarchive, nosnippet">
-  <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet">
-  <meta name="referrer" content="no-referrer">
-  <title>KaiBan ERP 2.0</title>
-  <link rel="stylesheet" href="style.css?v=20260626-ai-image-1">
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<meta content="#314d38" name="theme-color"/>
+<meta content="noindex, nofollow, noarchive, nosnippet" name="robots"/>
+<meta content="noindex, nofollow, noarchive, nosnippet" name="googlebot"/>
+<meta content="no-referrer" name="referrer"/><meta content="default-src 'self' https://script.google.com https://*.googleusercontent.com; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';" http-equiv="Content-Security-Policy"/>
+<title>開拌 KaiBan ERP</title>
+<link href="style.css?v=20260629-ui-redesign-1" rel="stylesheet"/>
 </head>
 <body class="authLocked">
-  <section id="authGate" class="authGate" aria-labelledby="loginTitle">
-    <div class="loginCard">
-      <div class="loginLogo">拌</div>
-      <p class="loginEyebrow">KAI BAN PRIVATE ERP</p>
-      <h1 id="loginTitle">開拌內部系統</h1>
-      <p class="loginDescription">此頁面僅供授權人員使用。請輸入共用密碼後繼續。</p>
-      <form id="loginForm" class="loginForm">
-        <label for="loginPassword">登入密碼</label>
-        <input id="loginPassword" type="password" autocomplete="current-password" required autofocus>
-        <button id="loginButton" class="button primary" type="submit">登入 ERP</button>
-      </form>
-      <p id="loginError" class="loginError" role="alert" hidden></p>
-      <p class="loginPrivacy">資料由私人 Google Sheet 讀取，登入工作階段約 6 小時。</p>
-    </div>
-  </section>
-  <aside class="sidebar">
-    <div class="brand">
-      <div class="logo">拌</div>
-      <div>
-        <strong>KaiBan ERP</strong>
-        <span>開拌食材成本系統 2.0</span>
-      </div>
-    </div>
-
-    <nav class="navList" aria-label="主要功能">
-      <button class="nav active" data-view="dashboard" data-title="Dashboard">Dashboard</button>
-      <button class="nav" data-view="foods" data-title="食材搜尋">食材搜尋</button>
-      <button class="nav" data-view="purchases" data-title="採購紀錄">採購紀錄</button>
-      <button class="nav" data-view="monthly" data-title="每月支出">每月支出</button>
-      <button class="nav navPhoto" data-view="photoEntry" data-title="拍照建檔">拍照建檔</button>
-      <button class="nav navAccent" data-view="quickEntry" data-title="快速建立資料庫">快速建立資料庫</button>
-      <button class="nav" data-view="suppliers" data-title="供應商">供應商</button>
-    </nav>
-
-    <div class="sidebarFoot">
-      <span id="dataStatus" class="statusDot">資料準備中</span>
-      <button id="reloadData" class="sideAction" type="button">重新讀取資料</button>
-      <button id="logoutButton" class="sideAction logoutAction" type="button">登出</button>
-    </div>
-  </aside>
-
-  <main>
-    <section class="topbar">
-      <div>
-        <h1 id="pageTitle">Dashboard</h1>
-        <p id="pageDescription">採購、食材、供應商與每月支出集中管理。</p>
-      </div>
-      <div class="searchBox">
-        <input id="globalSearch" type="search" placeholder="搜尋：雞胸、醬、Costco、開元…" autocomplete="off">
-      </div>
-    </section>
-
-    <div id="notice" class="notice" hidden></div>
-
-    <section id="dashboard" class="view active">
-      <div class="cards dashboardCards">
-        <div class="stat">
-          <span>採購筆數</span>
-          <strong id="statRows">0</strong>
-        </div>
-        <div class="stat">
-          <span>累計金額</span>
-          <strong id="statTotal">$0</strong>
-        </div>
-        <div class="stat highlight">
-          <span id="statMonthLabel">本月支出</span>
-          <strong id="statMonth">$0</strong>
-        </div>
-        <div class="stat">
-          <span>供應商數</span>
-          <strong id="statSuppliers">0</strong>
-        </div>
-        <div class="stat">
-          <span>食材品項</span>
-          <strong id="statFoods">0</strong>
-        </div>
-      </div>
-
-      <div class="dashboardGrid">
-        <div class="panel">
-          <div class="panelHead">
-            <div>
-              <h2>最近採購</h2>
-              <p class="muted">依日期顯示最新 8 筆資料。</p>
-            </div>
-          </div>
-          <div id="recentList" class="list"></div>
-        </div>
-
-        <div class="panel">
-          <div class="panelHead">
-            <div>
-              <h2>本月供應商支出</h2>
-              <p class="muted">快速查看本月主要支出去向。</p>
-            </div>
-          </div>
-          <div id="dashboardSupplierBars" class="barList"></div>
-        </div>
-      </div>
-    </section>
-
-    <section id="foods" class="view">
-      <div class="panel">
-        <div class="panelHead">
-          <div>
-            <h2>食材搜尋</h2>
-            <p class="muted">同品項合併顯示最新價、最低價、最高價與平均價。</p>
-          </div>
-        </div>
-        <div id="foodCards" class="foodGrid"></div>
-      </div>
-    </section>
-
-    <section id="purchases" class="view">
-      <div class="panel">
-        <div class="panelHead">
-          <div>
-            <h2>採購紀錄</h2>
-            <p id="purchaseCountText" class="muted">共 0 筆</p>
-          </div>
-          <button id="exportAllCsv" class="button secondary" type="button">匯出 CSV</button>
-        </div>
-        <div class="tableWrap">
-          <table>
-            <thead>
-              <tr>
-                <th>日期</th>
-                <th>供應商</th>
-                <th>品項</th>
-                <th>分類</th>
-                <th>規格</th>
-                <th>數量</th>
-                <th>單位</th>
-                <th>單價</th>
-                <th>小計</th>
-                <th>備註</th>
-              </tr>
-            </thead>
-            <tbody id="purchaseRows"></tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-
-    <section id="monthly" class="view">
-      <div class="panel monthToolbar">
-        <div>
-          <h2>每月支出分析</h2>
-          <p class="muted">從採購紀錄自動彙整，不需要另外填表。</p>
-        </div>
-        <div class="monthControls">
-          <label for="monthPicker">選擇月份</label>
-          <input id="monthPicker" type="month">
-          <button id="exportMonthCsv" class="button secondary" type="button">匯出本月</button>
-        </div>
-      </div>
-
-      <div class="cards monthCards">
-        <div class="stat highlight">
-          <span>本月總支出</span>
-          <strong id="monthTotal">$0</strong>
-        </div>
-        <div class="stat">
-          <span>採購筆數</span>
-          <strong id="monthCount">0</strong>
-        </div>
-        <div class="stat">
-          <span>供應商數</span>
-          <strong id="monthSupplierCount">0</strong>
-        </div>
-        <div class="stat">
-          <span>平均每筆</span>
-          <strong id="monthAverage">$0</strong>
-        </div>
-      </div>
-
-      <div class="analysisGrid">
-        <div class="panel">
-          <h2>供應商支出排行</h2>
-          <div id="monthSupplierBars" class="barList"></div>
-        </div>
-        <div class="panel">
-          <h2>分類支出排行</h2>
-          <div id="monthCategoryBars" class="barList"></div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="panelHead">
-          <div>
-            <h2>本月明細</h2>
-            <p id="monthDetailText" class="muted">共 0 筆</p>
-          </div>
-        </div>
-        <div class="tableWrap">
-          <table>
-            <thead>
-              <tr>
-                <th>日期</th>
-                <th>供應商</th>
-                <th>品項</th>
-                <th>分類</th>
-                <th>數量</th>
-                <th>單位</th>
-                <th>單價</th>
-                <th>小計</th>
-              </tr>
-            </thead>
-            <tbody id="monthRows"></tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-
-
-    <section id="photoEntry" class="view">
-      <div class="quickIntro photoIntro">
-        <div>
-          <span class="eyebrow">AI 智慧轉換建檔</span>
-          <h2>不同格式也能讀，能辨識多少就先填多少</h2>
-          <p>支援發票、收據、採購單與手寫單。AI 會先抄錄可讀內容，再轉成 ERP 欄位；推算與缺漏資料會清楚標示。</p>
-        </div>
-        <div id="photoApiBadge" class="apiBadge">尚未連接 AI 辨識接口</div>
-      </div>
-
-      <div class="aiWorkflowNote">
-        <span><b>原文辨識</b>：照片上直接看得到</span>
-        <span><b>AI 推算</b>：由數量、單價、金額等可驗證資料計算</span>
-        <span><b>待確認</b>：照片沒有或無法判讀，保留空白</span>
-      </div>
-
-      <div class="photoGrid">
-        <div class="panel photoUploadPanel">
-          <div class="panelHead">
-            <div>
-              <h2>1. 拍照或上傳</h2>
-              <p class="muted">格式不必固定；請盡量拍完整、對焦清楚並避免反光。</p>
-            </div>
-          </div>
-
-          <label class="photoDrop" for="receiptFile">
-            <input id="receiptFile" type="file" accept="image/*" capture="environment" hidden>
-            <span class="photoDropIcon">📷</span>
-            <strong>點這裡拍照或選擇照片</strong>
-            <span>JPG、PNG、HEIC（瀏覽器支援時）</span>
-          </label>
-
-          <div id="receiptPreviewWrap" class="receiptPreviewWrap" hidden>
-            <img id="receiptPreview" alt="單據照片預覽">
-            <div class="previewMeta">
-              <span id="receiptFileName"></span>
-              <span id="receiptFileSize"></span>
-            </div>
-          </div>
-
-          <div class="formActions photoActions">
-            <button id="analyzeReceipt" class="button primary" type="button" disabled>AI 智慧辨識</button>
-            <button id="clearReceipt" class="button ghost" type="button" disabled>清除照片</button>
-          </div>
-          <p id="receiptAnalyzeStatus" class="photoStatus muted">尚未選擇照片</p>
-        </div>
-
-        <div class="panel photoResultPanel">
-          <div class="panelHead">
-            <div>
-              <h2>2. 確認 AI 轉換結果</h2>
-              <p class="muted">黃色是 AI 推算、紅色是待確認；修改後會標記為已確認。</p>
-            </div>
-            <div class="analysisBadges">
-              <span id="receiptModelBadge" class="analysisBadge">尚未辨識</span>
-              <span id="receiptQualityBadge" class="analysisBadge">品質未判定</span>
-            </div>
-          </div>
-
-          <div id="receiptResultEmpty" class="empty photoEmpty">
+<section aria-labelledby="loginTitle" class="authGate" id="authGate">
+<div class="loginCard">
+<div class="loginLogo">拌</div>
+<p class="loginEyebrow">KAI BAN PRIVATE ERP</p>
+<h1 id="loginTitle">開拌內部系統</h1>
+<p class="loginDescription">此頁面僅供授權人員使用。請輸入共用密碼後繼續。</p>
+<form class="loginForm" id="loginForm">
+<label for="loginPassword">登入密碼</label>
+<input autocomplete="current-password" autofocus="" id="loginPassword" required="" type="password"/>
+<button class="button primary" id="loginButton" type="submit">登入 ERP</button>
+</form>
+<p class="loginError" hidden="" id="loginError" role="alert"></p>
+<p class="loginPrivacy">資料由私人 Google Sheet 讀取，登入工作階段約 6 小時。</p>
+</div>
+</section>
+<aside class="sidebar">
+<div class="brand">
+<div class="logo">拌</div>
+<div>
+<strong>KaiBan ERP</strong>
+<span>開拌食材成本系統</span>
+</div>
+</div>
+<nav aria-label="主要功能" class="navList"><button class="nav active" data-title="首頁" data-view="dashboard">首頁</button><button class="nav" data-title="記帳" data-view="record">記帳</button><button class="nav" data-title="查價" data-view="price">查價</button><button class="nav" data-title="報表" data-view="reports">報表</button></nav>
+<div class="sidebarFoot"><div class="sidebarConnection"><span class="statusDot loading" id="dataStatus">載入中...</span><button class="sideAction retryAction" hidden="" id="reloadData" type="button">重試</button></div><button class="sideAction logoutAction" id="logoutButton" type="button">登出</button></div>
+</aside>
+<main>
+<section class="topbar">
+<div>
+<h1 id="pageTitle">首頁</h1>
+<p id="pageDescription">選擇今天要完成的工作。</p>
+</div>
+<div class="searchBox">
+<input autocomplete="off" id="globalSearch" placeholder="搜尋：雞胸、醬、Costco、開元…" type="search"/>
+</div>
+</section>
+<div class="notice" hidden="" id="notice"></div>
+<section class="view active" id="dashboard"><div class="taskLauncher"><div class="taskLauncherIntro"><span class="eyebrow">今天要做什麼？</span><h2>選一個任務，直接開始</h2><p>把常用操作集中在首頁，減少尋找功能的時間。</p></div><div class="taskCardGrid"><button class="taskCard" data-route-tab="photoEntry" data-route-view="record" type="button"><span class="taskCardIcon">📷</span><span class="taskCardText"><strong>拍照記帳</strong><small>拍收據或發票，AI 自動辨識入帳</small></span><span class="taskCardArrow">→</span></button><button class="taskCard" data-route-tab="quickEntry" data-route-view="record" type="button"><span class="taskCardIcon">✏️</span><span class="taskCardText"><strong>手動記帳</strong><small>直接輸入今天的採購項目</small></span><span class="taskCardArrow">→</span></button><button class="taskCard" data-route-tab="foods" data-route-view="price" type="button"><span class="taskCardIcon">🔍</span><span class="taskCardText"><strong>查價</strong><small>搜尋食材歷史價格</small></span><span class="taskCardArrow">→</span></button></div></div></section><section class="view" id="record"><div aria-label="record" class="sectionTabs" role="tablist"><button aria-selected="true" class="sectionTab active" data-tab-group="record" data-tab-target="photoEntry" role="tab" type="button">📷 拍照記帳</button><button aria-selected="false" class="sectionTab" data-tab-group="record" data-tab-target="quickEntry" role="tab" type="button">✏️ 手動記帳</button></div><section class="modulePanel active" id="photoEntry">
+<div class="quickIntro photoIntro">
+<div>
+<span class="eyebrow">拍照記帳</span>
+<h2>拍照後自動辨識，確認內容即可入帳</h2>
+<p>支援發票、收據、採購單與手寫單。選擇照片後會自動開始辨識。</p>
+</div>
+<div class="apiBadge" hidden="" id="photoApiBadge"><span>系統連線中，請稍候再試</span><button class="inlineRetry" data-retry-connection="" type="button">重試</button></div>
+</div>
+<div class="aiWorkflowNote">
+<span><b>原文辨識</b>：照片上直接看得到</span>
+<span><b>AI 推算</b>：由數量、單價、金額等可驗證資料計算</span>
+<span><b>待確認</b>：照片沒有或無法判讀，保留空白</span>
+</div>
+<div class="photoGrid">
+<div class="panel photoUploadPanel">
+<div class="panelHead">
+<div>
+<h2>1. 拍照或上傳</h2>
+<p class="muted">格式不必固定；請盡量拍完整、對焦清楚並避免反光。</p>
+</div>
+</div>
+<label class="photoDrop" for="receiptFile">
+<input accept="image/*" capture="environment" hidden="" id="receiptFile" type="file"/>
+<span class="photoDropIcon">📷</span>
+<strong>點這裡拍照或選擇照片</strong>
+<span>JPG、PNG、HEIC（瀏覽器支援時）</span>
+</label>
+<div class="receiptPreviewWrap" hidden="" id="receiptPreviewWrap">
+<img alt="單據照片預覽" id="receiptPreview"/>
+<div class="previewMeta">
+<span id="receiptFileName"></span>
+<span id="receiptFileSize"></span>
+</div>
+</div>
+<div class="formActions photoActions">
+<button class="button primary" disabled="" hidden="" id="analyzeReceipt" type="button">辨識中...</button>
+<button class="button ghost" disabled="" id="clearReceipt" type="button">清除照片</button>
+</div>
+<p class="photoStatus muted" id="receiptAnalyzeStatus">尚未選擇照片</p>
+</div>
+<div class="panel photoResultPanel">
+<div class="panelHead">
+<div>
+<h2>2. 確認辨識結果</h2>
+<p class="muted">黃色是 AI 推算、紅色是待確認；修改後會標記為已確認。</p>
+</div>
+<div class="analysisBadges">
+<span class="analysisBadge" id="receiptModelBadge">尚未辨識</span>
+<span class="analysisBadge" id="receiptQualityBadge">品質未判定</span>
+</div>
+</div>
+<div class="empty photoEmpty" id="receiptResultEmpty">
             上傳照片並完成 AI 辨識後，可讀資料會顯示在這裡。
           </div>
+<div hidden="" id="receiptResult">
+<div class="receiptIssues" hidden="" id="receiptIssues"></div>
+<div class="receiptHeaderFields">
+<label>
+<span>日期 *</span>
+<input id="receiptDate" type="date"/>
+<small class="fieldHint" id="receiptDateHint"></small>
+</label>
+<label>
+<span>供應商 *</span>
+<input id="receiptSupplier" list="supplierOptions" placeholder="供應商或店家名稱" type="text"/>
+<small class="fieldHint" id="receiptSupplierHint"></small>
+</label>
+<div class="receiptTotalBox">
+<span>單據總額</span>
+<strong id="receiptTotal">$0</strong>
+</div>
+</div>
+<div class="receiptInfoLine">
+<span class="tag" id="receiptDocumentType">單據</span>
+<span class="muted" id="receiptInvoiceNumber"></span>
+<span class="muted" id="receiptNote"></span>
+</div>
+<div aria-label="AI 欄位狀態說明" class="fieldLegend">
+<span class="legendItem read">原文辨識</span>
+<span class="legendItem inferred">AI 推算</span>
+<span class="legendItem missing">待確認</span>
+<span class="legendItem confirmed">已修改確認</span>
+</div>
+<div class="tableWrap receiptTableWrap">
+<table class="receiptTable">
+<thead>
+<tr>
+<th>品項 *</th>
+<th>分類</th>
+<th>規格</th>
+<th>數量</th>
+<th>單位</th>
+<th>單價</th>
+<th>金額 *</th>
+<th>信心</th>
+<th>狀態</th>
+<th></th>
+</tr>
+</thead>
+<tbody id="receiptRows"></tbody>
+</table>
+</div>
+<details class="rawTextPanel">
+<summary>查看 AI 從照片讀到的原始文字</summary>
+<textarea id="receiptRawText" placeholder="AI 讀到的原始文字會顯示在這裡" readonly=""></textarea>
+</details>
+<div class="formActions receiptResultActions">
+<button class="button ghost" id="addReceiptItem" type="button">新增空白品項</button>
+<button class="button primary" id="addReceiptToStaged" type="button">確認入帳</button>
+<button class="button secondary" id="reanalyzeReceipt" type="button">重新辨識</button>
+</div>
+</div>
+</div>
+</div>
+</section><section class="modulePanel" id="quickEntry">
+<div class="quickIntro">
+<div>
+<span class="eyebrow">手動記帳</span>
+<h2>輸入今天的採購項目</h2>
+<p>填寫完成後按「確認入帳」，系統會直接儲存紀錄。</p>
+</div>
+<div class="apiBadge" hidden="" id="apiBadge"><span>系統連線中，請稍候再試</span><button class="inlineRetry" data-retry-connection="" type="button">重試</button></div>
+</div>
+<div class="quickGrid single">
+<div class="panel">
+<div class="panelHead">
+<div>
+<h2>逐筆新增</h2>
+<p class="muted">金額會依數量 × 單價自動計算。</p>
+</div>
+</div>
+<form class="entryForm" id="quickForm">
+<label>
+<span>日期 *</span>
+<input id="entryDate" name="date" required="" type="date"/>
+</label>
+<label>
+<span>供應商 *</span>
+<input id="entrySupplier" list="supplierOptions" name="supplier" placeholder="例如：Costco" required=""/>
+</label>
+<div class="wide formField">
+<span>品項 *</span>
+<div class="entryInputAction">
+<input id="entryName" list="itemOptions" name="name" placeholder="例如：原味嫩雞胸" required=""/>
+<button class="aiImageButton" id="searchImagesButton" type="button">✨ AI 找圖</button>
+</div>
+<div class="imageSearchPanel" hidden="" id="imageSearchPanel">
+<div class="imageSearchPanelHead">
+<strong>選擇一張品項圖片</strong>
+<button aria-label="關閉圖片搜尋結果" class="imageSearchClose" id="closeImageSearch" type="button">×</button>
+</div>
+<div class="imageSearchStatus" id="imageSearchStatus"></div>
+<div class="imageSearchResults" id="imageSearchResults"></div>
+</div>
+</div>
+<label class="wide">
+<span>圖片網址</span>
+<input id="entryImageUrl" name="imageUrl" placeholder="選擇圖片後會自動填入；未選擇時送出會自動找圖" readonly="" type="text"/>
+<small class="fieldHint">可手動選圖；留白時系統會在儲存時自動補上第一張搜尋圖片。</small>
+</label>
+<label>
+<span>分類</span>
+<input id="entryCategory" list="categoryOptions" name="category" placeholder="選擇或輸入新分類"/>
+</label>
+<label>
+<span>規格</span>
+<input id="entrySpec" name="spec" placeholder="例如：1kg／包"/>
+</label>
+<label>
+<span>數量 *</span>
+<input id="entryQty" min="0" name="qty" required="" step="0.01" type="number" value="1"/>
+</label>
+<label>
+<span>單位</span>
+<input id="entryUnit" list="unitOptions" name="unit" placeholder="包、瓶、kg"/>
+</label>
+<label>
+<span>單價 *</span>
+<input id="entryPrice" min="0" name="price" required="" step="0.01" type="number"/>
+</label>
+<label>
+<span>金額 *</span>
+<input id="entryAmount" min="0" name="amount" required="" step="0.01" type="number"/>
+</label>
+<label class="wide">
+<span>備註</span>
+<input id="entryNote" name="note" placeholder="促銷、含稅、買一送一等"/>
+</label>
+<div class="formActions wide">
+<button class="button primary" id="quickSubmit" type="submit">確認入帳</button>
+<button class="button ghost" id="resetQuickForm" type="button">清空欄位</button>
+</div>
+</form>
+</div>
 
-          <div id="receiptResult" hidden>
-            <div id="receiptIssues" class="receiptIssues" hidden></div>
-
-            <div class="receiptHeaderFields">
-              <label>
-                <span>日期 *</span>
-                <input id="receiptDate" type="date">
-                <small id="receiptDateHint" class="fieldHint"></small>
-              </label>
-              <label>
-                <span>供應商 *</span>
-                <input id="receiptSupplier" type="text" list="supplierOptions" placeholder="供應商或店家名稱">
-                <small id="receiptSupplierHint" class="fieldHint"></small>
-              </label>
-              <div class="receiptTotalBox">
-                <span>單據總額</span>
-                <strong id="receiptTotal">$0</strong>
-              </div>
-            </div>
-
-            <div class="receiptInfoLine">
-              <span id="receiptDocumentType" class="tag">單據</span>
-              <span id="receiptInvoiceNumber" class="muted"></span>
-              <span id="receiptNote" class="muted"></span>
-            </div>
-
-            <div class="fieldLegend" aria-label="AI 欄位狀態說明">
-              <span class="legendItem read">原文辨識</span>
-              <span class="legendItem inferred">AI 推算</span>
-              <span class="legendItem missing">待確認</span>
-              <span class="legendItem confirmed">已修改確認</span>
-            </div>
-
-            <div class="tableWrap receiptTableWrap">
-              <table class="receiptTable">
-                <thead>
-                  <tr>
-                    <th>品項 *</th>
-                    <th>分類</th>
-                    <th>規格</th>
-                    <th>數量</th>
-                    <th>單位</th>
-                    <th>單價</th>
-                    <th>金額 *</th>
-                    <th>信心</th>
-                    <th>狀態</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody id="receiptRows"></tbody>
-              </table>
-            </div>
-
-            <details class="rawTextPanel">
-              <summary>查看 AI 從照片讀到的原始文字</summary>
-              <textarea id="receiptRawText" readonly placeholder="AI 讀到的原始文字會顯示在這裡"></textarea>
-            </details>
-
-            <div class="formActions receiptResultActions">
-              <button id="addReceiptItem" class="button ghost" type="button">新增空白品項</button>
-              <button id="addReceiptToStaged" class="button primary" type="button">加入待送清單</button>
-              <button id="reanalyzeReceipt" class="button secondary" type="button">重新辨識</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section id="quickEntry" class="view">
-      <div class="quickIntro">
-        <div>
-          <span class="eyebrow">快速建檔</span>
-          <h2>把新採購快速加入資料庫</h2>
-          <p>可逐筆輸入，也可從 Excel／Google Sheet 直接複製多列貼上。</p>
-        </div>
-        <div id="apiBadge" class="apiBadge">尚未連接寫入接口</div>
-      </div>
-
-      <div class="quickGrid">
-        <div class="panel">
-          <div class="panelHead">
-            <div>
-              <h2>逐筆新增</h2>
-              <p class="muted">金額會依數量 × 單價自動計算。</p>
-            </div>
-          </div>
-
-          <form id="quickForm" class="entryForm">
-            <label>
-              <span>日期 *</span>
-              <input id="entryDate" name="date" type="date" required>
-            </label>
-            <label>
-              <span>供應商 *</span>
-              <input id="entrySupplier" name="supplier" list="supplierOptions" required placeholder="例如：Costco">
-            </label>
-            <div class="wide formField">
-              <span>品項 *</span>
-              <div class="entryInputAction">
-                <input id="entryName" name="name" list="itemOptions" required placeholder="例如：原味嫩雞胸">
-                <button id="searchImagesButton" class="aiImageButton" type="button">✨ AI 找圖</button>
-              </div>
-
-              <div id="imageSearchPanel" class="imageSearchPanel" hidden>
-                <div class="imageSearchPanelHead">
-                  <strong>選擇一張品項圖片</strong>
-                  <button id="closeImageSearch" class="imageSearchClose" type="button" aria-label="關閉圖片搜尋結果">×</button>
-                </div>
-                <div id="imageSearchStatus" class="imageSearchStatus"></div>
-                <div id="imageSearchResults" class="imageSearchResults"></div>
-              </div>
-            </div>
-
-            <label class="wide">
-              <span>圖片網址</span>
-              <input id="entryImageUrl" name="imageUrl" type="text" readonly placeholder="選擇圖片後會自動填入">
-            </label>
-            <label>
-              <span>分類</span>
-              <input id="entryCategory" name="category" list="categoryOptions" placeholder="例如：雞肉">
-            </label>
-            <label>
-              <span>規格</span>
-              <input id="entrySpec" name="spec" placeholder="例如：1kg／包">
-            </label>
-            <label>
-              <span>數量 *</span>
-              <input id="entryQty" name="qty" type="number" min="0" step="0.01" value="1" required>
-            </label>
-            <label>
-              <span>單位</span>
-              <input id="entryUnit" name="unit" list="unitOptions" placeholder="包、瓶、kg">
-            </label>
-            <label>
-              <span>單價 *</span>
-              <input id="entryPrice" name="price" type="number" min="0" step="0.01" required>
-            </label>
-            <label>
-              <span>金額 *</span>
-              <input id="entryAmount" name="amount" type="number" min="0" step="0.01" required>
-            </label>
-            <label class="wide">
-              <span>備註</span>
-              <input id="entryNote" name="note" placeholder="促銷、含稅、買一送一等">
-            </label>
-            <div class="formActions wide">
-              <button class="button primary" type="submit">加入待送清單</button>
-              <button id="resetQuickForm" class="button ghost" type="button">清空欄位</button>
-            </div>
-          </form>
-        </div>
-
-        <div class="panel">
-          <div class="panelHead">
-            <div>
-              <h2>批次貼上</h2>
-              <p class="muted">支援試算表欄位或逗號分隔資料。</p>
-            </div>
-          </div>
-          <div class="pasteGuide">
+</div><details class="batchMode" id="batchMode"><summary>進階：批次模式</summary><div class="batchModeContent"><div class="panel">
+<div class="panelHead">
+<div>
+<h2>批次貼上</h2>
+<p class="muted">支援試算表欄位或逗號分隔資料。</p>
+</div>
+</div>
+<div class="pasteGuide">
             欄位順序：日期、供應商、品項、分類、規格、數量、單位、單價、金額、備註
           </div>
-          <textarea id="bulkPaste" rows="12" placeholder="2026/06/22&#9;Costco&#9;雞胸肉&#9;雞肉&#9;1kg&#9;2&#9;包&#9;299&#9;598&#9;"></textarea>
-          <div class="formActions">
-            <button id="parseBulk" class="button primary" type="button">解析並加入</button>
-            <button id="downloadTemplate" class="button ghost" type="button">下載空白範本</button>
-          </div>
-        </div>
-      </div>
+<textarea id="bulkPaste" placeholder="2026/06/22	Costco	雞胸肉	雞肉	1kg	2	包	299	598	" rows="12"></textarea>
+<div class="formActions">
+<button class="button primary" id="parseBulk" type="button">加入批次清單</button>
+<button class="button ghost" id="downloadTemplate" type="button">下載空白範本</button>
+</div>
+</div><div class="panel stagingPanel">
+<div class="panelHead">
+<div>
+<h2>批次待存清單</h2>
+<p class="muted" id="stagedSummary">尚未加入資料</p>
+</div>
+<div class="panelActions">
+<button class="button ghost" id="clearStaged" type="button">全部清除</button>
+<button class="button secondary" id="downloadStaged" type="button">下載備份 CSV</button>
+<button class="button primary" id="submitStaged" type="button">儲存紀錄</button>
+</div>
+</div>
+<div class="tableWrap">
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>日期</th>
+<th>供應商</th>
+<th>品項</th>
+<th>圖片</th>
+<th>分類</th>
+<th>數量</th>
+<th>單位</th>
+<th>單價</th>
+<th>金額</th>
+<th></th>
+</tr>
+</thead>
+<tbody id="stagedRows"></tbody>
+</table>
+</div>
+</div></div></details>
 
-      <div class="panel stagingPanel">
-        <div class="panelHead">
-          <div>
-            <h2>待送清單</h2>
-            <p id="stagedSummary" class="muted">尚未加入資料</p>
-          </div>
-          <div class="panelActions">
-            <button id="clearStaged" class="button ghost" type="button">全部清除</button>
-            <button id="downloadStaged" class="button secondary" type="button">下載備份 CSV</button>
-            <button id="submitStaged" class="button primary" type="button">寫入 Google Sheet</button>
-          </div>
-        </div>
-        <div class="tableWrap">
-          <table>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>日期</th>
-                <th>供應商</th>
-                <th>品項</th>
-                <th>分類</th>
-                <th>數量</th>
-                <th>單位</th>
-                <th>單價</th>
-                <th>金額</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="stagedRows"></tbody>
-          </table>
-        </div>
-      </div>
-    </section>
+</section></section><section class="view" id="price"><div aria-label="price" class="sectionTabs" role="tablist"><button aria-selected="true" class="sectionTab active" data-tab-group="price" data-tab-target="foods" role="tab" type="button">食材查價</button><button aria-selected="false" class="sectionTab" data-tab-group="price" data-tab-target="purchases" role="tab" type="button">採購紀錄</button></div><section class="modulePanel active" id="foods">
+<div class="panel">
+<div class="panelHead">
+<div>
+<h2>食材搜尋</h2>
+<p class="muted">同品項合併顯示最新價、最低價、最高價與平均價。</p>
+</div>
+<div class="panelActions">
+<button class="button secondary" id="backfillProductImages" type="button">✨ 自動補齊缺少圖片</button>
+</div>
+</div>
+<div class="foodGrid" id="foodCards"></div>
+</div>
+</section><section class="modulePanel" id="purchases">
+<div class="panel">
+<div class="panelHead">
+<div>
+<h2>採購紀錄</h2>
+<p class="muted" id="purchaseCountText">共 0 筆</p>
+</div>
+<button class="button secondary" id="exportAllCsv" type="button">匯出 CSV</button>
+</div>
+<div class="tableWrap">
+<table>
+<thead>
+<tr>
+<th>日期</th>
+<th>供應商</th>
+<th>品項</th>
+<th>圖片</th>
+<th>分類</th>
+<th>規格</th>
+<th>數量</th>
+<th>單位</th>
+<th>單價</th>
+<th>小計</th>
+<th>備註</th>
+</tr>
+</thead>
+<tbody id="purchaseRows"></tbody>
+</table>
+</div>
+</div>
+</section></section><section class="view" id="reports"><div aria-label="reports" class="sectionTabs" role="tablist"><button aria-selected="true" class="sectionTab active" data-tab-group="reports" data-tab-target="monthly" role="tab" type="button">每月支出</button><button aria-selected="false" class="sectionTab" data-tab-group="reports" data-tab-target="suppliers" role="tab" type="button">供應商</button></div><section class="modulePanel active" id="monthly">
+<div class="panel monthToolbar">
+<div>
+<h2>每月支出分析</h2>
+<p class="muted">從採購紀錄自動彙整，不需要另外填表。</p>
+</div>
+<div class="monthControls">
+<label for="monthPicker">選擇月份</label>
+<input id="monthPicker" type="month"/>
+<button class="button secondary" id="exportMonthCsv" type="button">匯出本月</button>
+</div>
+</div>
+<div class="cards monthCards">
+<div class="stat highlight">
+<span>本月總支出</span>
+<strong id="monthTotal">$0</strong>
+</div>
+<div class="stat">
+<span>採購筆數</span>
+<strong id="monthCount">0</strong>
+</div>
+<div class="stat">
+<span>供應商數</span>
+<strong id="monthSupplierCount">0</strong>
+</div>
+<div class="stat">
+<span>平均每筆</span>
+<strong id="monthAverage">$0</strong>
+</div>
+</div>
+<div class="analysisGrid">
+<div class="panel">
+<h2>供應商支出排行</h2>
+<div class="barList" id="monthSupplierBars"></div>
+</div>
+<div class="panel">
+<h2>分類支出排行</h2>
+<div class="barList" id="monthCategoryBars"></div>
+</div>
+</div>
+<div class="panel">
+<div class="panelHead">
+<div>
+<h2>本月明細</h2>
+<p class="muted" id="monthDetailText">共 0 筆</p>
+</div>
+</div>
+<div class="tableWrap">
+<table>
+<thead>
+<tr>
+<th>日期</th>
+<th>供應商</th>
+<th>品項</th>
+<th>圖片</th>
+<th>分類</th>
+<th>數量</th>
+<th>單位</th>
+<th>單價</th>
+<th>小計</th>
+</tr>
+</thead>
+<tbody id="monthRows"></tbody>
+</table>
+</div>
+</div>
+</section><section class="modulePanel" id="suppliers">
+<div class="panel">
+<div class="panelHead">
+<div>
+<h2>供應商</h2>
+<p class="muted">依累計採購金額排序。</p>
+</div>
+</div>
+<div class="foodGrid" id="supplierCards"></div>
+</div>
+</section></section>
 
-    <section id="suppliers" class="view">
-      <div class="panel">
-        <div class="panelHead">
-          <div>
-            <h2>供應商</h2>
-            <p class="muted">依累計採購金額排序。</p>
-          </div>
-        </div>
-        <div id="supplierCards" class="foodGrid"></div>
-      </div>
-    </section>
-  </main>
 
-  <datalist id="supplierOptions"></datalist>
-  <datalist id="itemOptions"></datalist>
-  <datalist id="categoryOptions"></datalist>
-  <datalist id="unitOptions">
-    <option value="包"></option>
-    <option value="瓶"></option>
-    <option value="盒"></option>
-    <option value="袋"></option>
-    <option value="箱"></option>
-    <option value="kg"></option>
-    <option value="g"></option>
-    <option value="筆"></option>
-  </datalist>
-  <script src="app.js?v=20260626-ai-image-1"></script>
+
+
+
+
+</main>
+<datalist id="supplierOptions"></datalist>
+<datalist id="itemOptions"></datalist>
+<datalist id="categoryOptions"><option value="蔬菜"></option><option value="水果"></option><option value="肉類"></option><option value="海鮮"></option><option value="乾貨"></option><option value="調味料"></option><option value="飲品"></option><option value="其他"></option></datalist>
+<datalist id="unitOptions">
+<option value="包"></option>
+<option value="瓶"></option>
+<option value="盒"></option>
+<option value="袋"></option>
+<option value="箱"></option>
+<option value="kg"></option>
+<option value="g"></option>
+<option value="筆"></option>
+</datalist>
+<script src="app.js?v=20260629-ui-redesign-1"></script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 // =====================================================
-// KaiBan ERP 2.0
+// KaiBan ERP
 // 1. Google Sheet CSV 讀取
 // 2. data.js 備援資料
 // 3. 每月支出分析
@@ -23,16 +23,16 @@ let receiptImagePayload = null;
 let receiptAnalysis = null;
 let authToken = sessionStorage.getItem(AUTH_TOKEN_KEY) || "";
 let authenticationReady = false;
+let connectionState = "idle";
 
 const pageDescriptions = {
-  dashboard: "採購、食材、供應商與每月支出集中管理。",
-  foods: "搜尋品項並比較歷史價格。",
-  purchases: "查看所有採購明細與匯出資料。",
-  monthly: "依月份分析總支出、供應商與品項分類。",
-  photoEntry: "拍照辨識收據、發票或採購單，確認後快速建檔。",
-  quickEntry: "逐筆輸入或批次貼上，快速累積採購資料庫。",
-  suppliers: "查看各供應商累計採購金額與品項數。",
+  dashboard: "選擇今天要完成的工作。",
+  record: "拍照或手動輸入採購紀錄。",
+  price: "搜尋食材歷史價格與採購明細。",
+  reports: "查看每月支出與供應商分析。",
 };
+
+const DEFAULT_CATEGORIES = ["蔬菜", "水果", "肉類", "海鮮", "乾貨", "調味料", "飲品", "其他"];
 
 const money = (value) => {
   const number = toNumber(value);
@@ -68,6 +68,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupQuickEntry();
   setupPhotoEntry();
   setupExports();
+  setupImageBackfill();
   setDefaultEntryDate();
   updateApiBadge();
   renderStagedRecords();
@@ -129,6 +130,7 @@ async function handleLoginSubmit(event) {
 
 function unlockErp() {
   authenticationReady = true;
+  connectionState = "loading";
   document.body.classList.remove("authLocked");
   $("authGate").hidden = true;
   updateApiBadge();
@@ -136,6 +138,7 @@ function unlockErp() {
 
 function lockErp() {
   authenticationReady = false;
+  connectionState = "idle";
   document.body.classList.add("authLocked");
   $("authGate").hidden = false;
   updateApiBadge();
@@ -148,7 +151,7 @@ function logoutErp() {
   lockErp();
   $("loginPassword").value = "";
   hideNotice();
-  setDataStatus("等待登入", "");
+  setDataStatus("載入中...", "loading");
   window.scrollTo({ top: 0 });
   setTimeout(() => $("loginPassword").focus(), 50);
 }
@@ -185,7 +188,7 @@ function handleAuthenticationFailure(message) {
 
 function secureApiRequest(payload, options = {}) {
   if (!APPS_SCRIPT_URL || !APPS_SCRIPT_URL.includes("/exec")) {
-    return Promise.reject(new Error("尚未設定 Apps Script 網址"));
+    return Promise.reject(new Error("系統尚未完成設定"));
   }
 
   const requestId = `erp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -252,7 +255,7 @@ function secureApiRequest(payload, options = {}) {
     }, options.timeoutMs || 45000);
 
     iframe.addEventListener("error", () => {
-      finish(() => reject(new Error("無法連線到 Apps Script")));
+      finish(() => reject(new Error("系統連線失敗")));
     });
 
     window.addEventListener("message", onMessage);
@@ -263,27 +266,83 @@ function secureApiRequest(payload, options = {}) {
 
 function setupNavigation() {
   document.querySelectorAll(".nav").forEach((button) => {
+    button.addEventListener("click", () => openErpRoute(button.dataset.view));
+  });
+
+  document.querySelectorAll(".sectionTab").forEach((button) => {
     button.addEventListener("click", () => {
-      document.querySelectorAll(".nav").forEach((item) => item.classList.remove("active"));
-      document.querySelectorAll(".view").forEach((view) => view.classList.remove("active"));
-
-      button.classList.add("active");
-      const viewId = button.dataset.view;
-      const view = $(viewId);
-      if (view) view.classList.add("active");
-
-      $("pageTitle").textContent = button.dataset.title || button.textContent.trim();
-      $("pageDescription").textContent = pageDescriptions[viewId] || "";
-      $("globalSearch").style.display = ["quickEntry", "photoEntry"].includes(viewId) ? "none" : "block";
-
-      if (viewId === "monthly") renderMonthly();
-      if (viewId === "quickEntry") renderStagedRecords();
-      if (viewId === "photoEntry") renderReceiptAnalysis();
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      activateSectionTab(button.dataset.tabGroup, button.dataset.tabTarget);
     });
   });
 
-  $("reloadData").addEventListener("click", () => { if (authenticationReady) loadData(); });
+  document.querySelectorAll("[data-route-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      openErpRoute(button.dataset.routeView, button.dataset.routeTab || "");
+    });
+  });
+
+  $("reloadData").addEventListener("click", () => {
+    if (authenticationReady) loadData();
+  });
+
+  document.querySelectorAll("[data-retry-connection]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (authenticationReady) loadData();
+    });
+  });
+
+  $("globalSearch").style.display = "none";
+}
+
+function openErpRoute(viewId, tabId = "") {
+  document.querySelectorAll(".nav").forEach((item) => {
+    item.classList.toggle("active", item.dataset.view === viewId);
+  });
+
+  document.querySelectorAll(".view").forEach((view) => {
+    view.classList.toggle("active", view.id === viewId);
+  });
+
+  const navButton = document.querySelector(`.nav[data-view="${viewId}"]`);
+  $("pageTitle").textContent = navButton?.dataset.title || navButton?.textContent.trim() || "開拌 ERP";
+  $("pageDescription").textContent = pageDescriptions[viewId] || "";
+  $("globalSearch").style.display = viewId === "price" ? "block" : "none";
+
+  if (tabId) activateSectionTab(viewId, tabId);
+
+  if (viewId === "record") {
+    const activeModule = $("record").querySelector(".modulePanel.active")?.id;
+    if (activeModule === "quickEntry") renderStagedRecords();
+    if (activeModule === "photoEntry") renderReceiptAnalysis();
+  }
+
+  if (viewId === "reports") {
+    const activeModule = $("reports").querySelector(".modulePanel.active")?.id;
+    if (activeModule === "monthly") renderMonthly();
+    if (activeModule === "suppliers") renderSuppliers();
+  }
+
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function activateSectionTab(groupId, tabId) {
+  const group = $(groupId);
+  if (!group) return;
+
+  group.querySelectorAll(".sectionTab").forEach((button) => {
+    const active = button.dataset.tabTarget === tabId;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+
+  group.querySelectorAll(".modulePanel").forEach((panel) => {
+    panel.classList.toggle("active", panel.id === tabId);
+  });
+
+  if (tabId === "monthly") renderMonthly();
+  if (tabId === "suppliers") renderSuppliers();
+  if (tabId === "quickEntry") renderStagedRecords();
+  if (tabId === "photoEntry") renderReceiptAnalysis();
 }
 
 function setupSearch() {
@@ -298,15 +357,18 @@ function setupMonthly() {
 }
 
 function setupQuickEntry() {
-  $("quickForm").addEventListener("submit", (event) => {
+  $("quickForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const record = getQuickFormRecord();
     if (!record) return;
-    stagedRecords.push(record);
-    saveStagedRecords();
-    renderStagedRecords();
-    resetQuickForm({ keepDate: true, keepSupplier: true });
-    showNotice(`已加入「${record.name}」到待送清單。`);
+
+    const saved = await writePurchaseRecords(
+      [record],
+      $("quickSubmit"),
+      `已儲存「${record.name}」的採購紀錄。`
+    );
+
+    if (saved) resetQuickForm({ keepDate: true, keepSupplier: true });
   });
 
   $("entryQty").addEventListener("input", calculateEntryAmount);
@@ -317,16 +379,12 @@ function setupQuickEntry() {
   const searchImagesButton = $("searchImagesButton");
   const closeImageSearch = $("closeImageSearch");
 
-  if (searchImagesButton) {
-    searchImagesButton.addEventListener("click", searchQuickEntryImages);
-  }
+  if (searchImagesButton) searchImagesButton.addEventListener("click", searchQuickEntryImages);
+  if (closeImageSearch) closeImageSearch.addEventListener("click", closeQuickEntryImageSearch);
 
-  if (closeImageSearch) {
-    closeImageSearch.addEventListener("click", closeQuickEntryImageSearch);
-  }
   $("parseBulk").addEventListener("click", parseBulkPaste);
   $("downloadTemplate").addEventListener("click", downloadTemplate);
-  $("downloadStaged").addEventListener("click", () => downloadPurchasesCsv(stagedRecords, "開拌_待匯入採購.csv"));
+  $("downloadStaged").addEventListener("click", () => downloadPurchasesCsv(stagedRecords, "開拌_批次採購備份.csv"));
   $("clearStaged").addEventListener("click", clearStagedRecords);
   $("submitStaged").addEventListener("click", submitStagedRecords);
 
@@ -448,6 +506,13 @@ function closeQuickEntryImageSearch() {
   if (status) status.textContent = "";
 }
 
+function renderTableImage(value, altText) {
+  const imageUrl = getSafeHttpUrl(value);
+  if (!imageUrl) return '<span class="tableImageEmpty">—</span>';
+
+  return `<img class="tableImageThumb" src="${escapeHTML(imageUrl)}" alt="${escapeHTML(altText || "品項圖片")}" loading="lazy" referrerpolicy="no-referrer" onerror="this.replaceWith(document.createTextNode('—'))">`;
+}
+
 function getSafeHttpUrl(value) {
   try {
     const url = new URL(String(value || ""));
@@ -476,7 +541,7 @@ function setupPhotoEntry() {
       return;
     }
 
-    setReceiptStatus("正在處理照片…");
+    setReceiptStatus("辨識中...", "loading");
     analyzeButton.disabled = true;
     clearButton.disabled = true;
 
@@ -486,9 +551,8 @@ function setupPhotoEntry() {
       $("receiptFileName").textContent = file.name || "現場拍照";
       $("receiptFileSize").textContent = formatFileSize(receiptImagePayload.bytes);
       $("receiptPreviewWrap").hidden = false;
-      analyzeButton.disabled = false;
       clearButton.disabled = false;
-      setReceiptStatus("照片已準備完成，請按「AI 智慧辨識」。", "ready");
+      await analyzeReceiptPhoto();
     } catch (error) {
       clearReceiptPhoto();
       showNotice(`照片處理失敗：${error.message}`, "error");
@@ -573,14 +637,14 @@ async function analyzeReceiptPhoto() {
     return;
   }
 
-  if (!APPS_SCRIPT_URL || !APPS_SCRIPT_URL.includes("/exec")) {
-    showNotice("尚未設定 Apps Script 寫入網址。", "error");
+  if (!authenticationReady || !authToken) {
+    handleAuthenticationFailure("請先登入後再使用拍照辨識。");
     return;
   }
 
   const buttons = [$("analyzeReceipt"), $("reanalyzeReceipt")];
-  buttons.forEach((button) => { button.disabled = true; });
-  setReceiptStatus("AI 先快速讀取；遇到手寫、模糊或特殊格式時會自動加強辨識…", "loading");
+  buttons.forEach((button) => { if (button) button.disabled = true; });
+  setReceiptStatus("辨識中...", "loading");
 
   try {
     const response = await secureApiRequest({
@@ -591,14 +655,17 @@ async function analyzeReceiptPhoto() {
 
     receiptAnalysis = normalizeReceiptAnalysis(response.result || {});
     renderReceiptAnalysis();
-    const modeText = receiptAnalysis.enhancedAnalysis ? "已使用加強辨識" : "快速辨識完成";
+    const modeText = receiptAnalysis.enhancedAnalysis ? "已完成加強辨識" : "辨識完成";
     setReceiptStatus(`${modeText}，找到 ${receiptAnalysis.items.length} 個品項。`, "success");
-    showNotice("AI 已把可讀內容轉成 ERP 欄位。請優先檢查黃色推算欄位與紅色待確認欄位。");
+    showNotice("辨識完成，請確認黃色推算欄位與紅色待確認欄位。");
   } catch (error) {
-    setReceiptStatus("辨識失敗，請確認 Apps Script 已重新部署。", "error");
-    showNotice(`AI 辨識失敗：${error.message}`, "error");
+    connectionState = "error";
+    updateApiBadge();
+    setDataStatus("連線失敗", "error");
+    setReceiptStatus("辨識失敗，請稍候再試。", "error");
+    showNotice("系統連線中，請稍候再試。", "error");
   } finally {
-    buttons.forEach((button) => { button.disabled = !receiptImagePayload; });
+    buttons.forEach((button) => { if (button) button.disabled = !receiptImagePayload; });
   }
 }
 
@@ -828,12 +895,12 @@ function qualityLabel(quality) {
   return { clear: "照片清楚", usable: "可用但需確認", difficult: "辨識困難" }[normalizeQuality(quality)];
 }
 
-function addReceiptAnalysisToStaged() {
+async function addReceiptAnalysisToStaged() {
   if (!receiptAnalysis || !receiptAnalysis.items.length) return;
   const date = $("receiptDate").value;
   const supplier = $("receiptSupplier").value.trim();
   if (!date || !supplier) {
-    showNotice("日期與供應商是建檔必要欄位；紅色欄位請先補齊。", "warn");
+    showNotice("日期與供應商是必要欄位，請先補齊。", "warn");
     return;
   }
 
@@ -870,13 +937,13 @@ function addReceiptAnalysisToStaged() {
     };
   });
 
-  stagedRecords.push(...records);
-  saveStagedRecords();
-  renderStagedRecords();
-  showNotice(`已把 ${records.length} 筆 AI 轉換資料加入待送清單。`);
+  const saved = await writePurchaseRecords(
+    records,
+    $("addReceiptToStaged"),
+    `已儲存 ${records.length} 筆拍照辨識紀錄。`
+  );
 
-  const quickNav = document.querySelector('[data-view="quickEntry"]');
-  if (quickNav) quickNav.click();
+  if (saved) clearReceiptPhoto();
 }
 
 function buildAiAuditNote(item) {
@@ -931,6 +998,54 @@ function setReceiptStatus(message, type = "") {
   status.className = `photoStatus muted ${type}`.trim();
 }
 
+function setupImageBackfill() {
+  const button = $("backfillProductImages");
+  if (!button) return;
+  button.addEventListener("click", backfillProductImages);
+}
+
+async function backfillProductImages() {
+  const button = $("backfillProductImages");
+  const missingCount = products.filter((product) => !getSafeHttpUrl(product.imageUrl)).length;
+
+  if (!missingCount) {
+    showNotice("目前所有食材都已有圖片。");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `目前有 ${missingCount} 個食材缺少圖片。\n系統每次最多自動補 20 個，會使用 SerpApi 搜尋額度。\n\n確定開始嗎？`
+  );
+  if (!confirmed) return;
+
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = "自動補圖中…";
+
+  try {
+    const response = await secureApiRequest(
+      { action: "backfillProductImages", limit: 20 },
+      { timeoutMs: 180000 }
+    );
+    const result = response.result || {};
+    await loadData();
+
+    const remainingText = Number(result.remaining) > 0
+      ? `，尚有 ${Number(result.remaining).toLocaleString("zh-TW")} 個可再次補圖`
+      : "，目前已無缺圖食材";
+
+    showNotice(
+      `已補上 ${Number(result.updatedProducts || 0).toLocaleString("zh-TW")} 個食材圖片，` +
+      `同步更新 ${Number(result.updatedPurchases || 0).toLocaleString("zh-TW")} 筆採購紀錄${remainingText}。`
+    );
+  } catch (error) {
+    if (authenticationReady) showNotice(`自動補圖失敗：${error.message}`, "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
 function setupExports() {
   $("exportAllCsv").addEventListener("click", () => downloadPurchasesCsv(getFilteredPurchases(), "開拌_全部採購紀錄.csv"));
   $("exportMonthCsv").addEventListener("click", () => {
@@ -942,7 +1057,9 @@ function setupExports() {
 async function loadData() {
   if (!authenticationReady || !authToken) return;
 
-  setDataStatus("私人資料讀取中", "");
+  connectionState = "loading";
+  updateApiBadge();
+  setDataStatus("載入中...", "loading");
   showLoading();
 
   try {
@@ -956,21 +1073,28 @@ async function loadData() {
       .map((row, index) => normalizePurchase(row, index));
 
     products = productRows.length
-      ? productRows.filter((row) => row && row["品項"]).map(normalizeProduct)
+      ? mergeProductImagesFromPurchases(
+          productRows.filter((row) => row && row["品項"]).map(normalizeProduct),
+          purchases
+        )
       : deriveProductsFromPurchases(purchases);
 
     setInitialMonth(true);
     render();
     populateDataLists();
-    setDataStatus("私人 Google Sheet 已同步", "ok");
+    connectionState = "connected";
+    setDataStatus("✓ 已連線", "ok");
+    updateApiBadge();
     hideNotice();
   } catch (error) {
     if (!authenticationReady) return;
     products = [];
     purchases = [];
     render();
-    setDataStatus("資料讀取失敗", "error");
-    showNotice(`私人資料讀取失敗：${error.message}`, "error");
+    connectionState = "error";
+    setDataStatus("連線失敗", "error");
+    updateApiBadge();
+    showNotice("系統連線中，請稍候再試。", "error");
   }
 }
 
@@ -1132,6 +1256,23 @@ function deriveProductsFromPurchases(list) {
   });
 }
 
+function mergeProductImagesFromPurchases(productList, purchaseList) {
+  const imageByName = new Map();
+
+  [...purchaseList]
+    .sort((a, b) => compareDate(b.date, a.date))
+    .forEach((purchase) => {
+      const key = norm(purchase.name);
+      const imageUrl = getSafeHttpUrl(purchase.imageUrl);
+      if (key && imageUrl && !imageByName.has(key)) imageByName.set(key, imageUrl);
+    });
+
+  return productList.map((product) => ({
+    ...product,
+    imageUrl: getSafeHttpUrl(product.imageUrl) || imageByName.get(norm(product.name)) || "",
+  }));
+}
+
 function getFilteredProducts() {
   const keyword = norm($("globalSearch").value);
   return products.filter((product) => {
@@ -1167,41 +1308,7 @@ function render() {
 }
 
 function renderDashboard() {
-  const activeProducts = products.filter((product) => product.active !== "FALSE");
-  const suppliers = new Set(purchases.map((purchase) => purchase.supplier).filter(Boolean));
-  const purchaseTotal = purchases.reduce((sum, purchase) => sum + purchase.amount, 0);
-  const dashboardMonth = currentMonthKey();
-  const monthList = purchases.filter((purchase) => monthKey(purchase.date) === dashboardMonth);
-  const monthTotal = monthList.reduce((sum, purchase) => sum + purchase.amount, 0);
-
-  $("statRows").textContent = purchases.length.toLocaleString("zh-TW");
-  $("statFoods").textContent = activeProducts.length.toLocaleString("zh-TW");
-  $("statSuppliers").textContent = suppliers.size.toLocaleString("zh-TW");
-  $("statTotal").textContent = money(purchaseTotal);
-  $("statMonth").textContent = money(monthTotal);
-  $("statMonthLabel").textContent = `${dashboardMonth.replace("-", "/")} 支出`;
-
-  const recent = [...purchases]
-    .filter((purchase) => purchase.date)
-    .sort((a, b) => compareDate(b.date, a.date))
-    .slice(0, 8);
-
-  $("recentList").innerHTML = recent.length
-    ? recent.map((purchase) => `
-      <div class="item">
-        <div class="itemMain">
-          <strong>${escapeHTML(purchase.name)}</strong>
-          <small>${escapeHTML(purchase.date)}｜${escapeHTML(purchase.supplier)}</small>
-        </div>
-        <div class="itemAmount">
-          <strong>${money(purchase.amount)}</strong>
-          <small>${formatNumber(purchase.qty)} ${escapeHTML(purchase.unit)} × ${money(purchase.price)}</small>
-        </div>
-      </div>
-    `).join("")
-    : '<div class="empty">尚無採購資料</div>';
-
-  renderBars($("dashboardSupplierBars"), groupTotals(monthList, "supplier"), 6);
+  // 首頁為任務啟動器，不顯示統計或圖表。
 }
 
 function renderProductCards(list) {
@@ -1223,6 +1330,8 @@ function renderProductCards(list) {
       ? `${change.direction === "up" ? "↑" : change.direction === "down" ? "↓" : "—"} 較上次 ${signedMoney(change.amount)}（${signedPercent(change.percent)}）`
       : "首次價格紀錄";
 
+    const imageUrl = getSafeHttpUrl(product.imageUrl);
+
     const supplierRows = priceStats.suppliers.map((supplier, index) => `
       <div class="supplierPriceRow ${index === 0 ? "isCheapest" : ""}">
         <div>
@@ -1238,7 +1347,13 @@ function renderProductCards(list) {
 
     return `
       <article class="foodCard priceCompareCard">
-        ${getSafeHttpUrl(product.imageUrl) ? `<img class="foodCardImage" src="${escapeHTML(getSafeHttpUrl(product.imageUrl))}" alt="${escapeHTML(product.name)}" loading="lazy" referrerpolicy="no-referrer">` : ""}
+        <div class="foodCardMedia ${imageUrl ? "hasImage" : ""}">
+          ${imageUrl ? `<img class="foodCardImage" src="${escapeHTML(imageUrl)}" alt="${escapeHTML(product.name)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.parentElement.classList.add('imageFailed')">` : ""}
+          <div class="foodCardImagePlaceholder" aria-hidden="true">
+            <span>🥗</span>
+            <small>尚未設定圖片</small>
+          </div>
+        </div>
         <div class="cardTags">
           <span class="tag">${escapeHTML(product.category || "未分類")}</span>
           <span class="tag">最新：${escapeHTML(priceStats.latestSupplier || product.supplier || "未填供應商")}</span>
@@ -1407,6 +1522,7 @@ function renderPurchaseRows(list) {
         <td>${escapeHTML(purchase.date)}</td>
         <td>${escapeHTML(purchase.supplier)}</td>
         <td>${escapeHTML(purchase.name)}</td>
+        <td class="tableImageCell">${renderTableImage(purchase.imageUrl, purchase.name)}</td>
         <td>${escapeHTML(purchase.category)}</td>
         <td>${escapeHTML(purchase.spec)}</td>
         <td>${formatNumber(purchase.qty)}</td>
@@ -1416,7 +1532,7 @@ function renderPurchaseRows(list) {
         <td>${escapeHTML(purchase.note)}</td>
       </tr>
     `).join("")
-    : '<tr><td colspan="10" class="empty">尚無採購資料</td></tr>';
+    : '<tr><td colspan="11" class="empty">尚無採購資料</td></tr>';
 }
 
 function renderMonthly() {
@@ -1650,7 +1766,7 @@ function renderStagedRecords() {
   const total = stagedRecords.reduce((sum, record) => sum + record.amount, 0);
   $("stagedSummary").textContent = stagedRecords.length
     ? `${stagedRecords.length.toLocaleString("zh-TW")} 筆｜合計 ${money(total)}`
-    : "尚未加入資料";
+    : "尚無批次資料";
 
   $("submitStaged").disabled = !stagedRecords.length;
   $("downloadStaged").disabled = !stagedRecords.length;
@@ -1663,6 +1779,7 @@ function renderStagedRecords() {
         <td>${escapeHTML(record.date)}</td>
         <td>${escapeHTML(record.supplier)}</td>
         <td>${escapeHTML(record.name)}</td>
+        <td class="tableImageCell">${renderTableImage(record.imageUrl, record.name)}</td>
         <td>${escapeHTML(record.category)}</td>
         <td>${formatNumber(record.qty)}</td>
         <td>${escapeHTML(record.unit)}</td>
@@ -1671,44 +1788,66 @@ function renderStagedRecords() {
         <td><button class="removeRow" type="button" data-remove-index="${index}">刪除</button></td>
       </tr>
     `).join("")
-    : '<tr><td colspan="10" class="empty">尚未加入資料</td></tr>';
+    : '<tr><td colspan="11" class="empty">尚無批次資料</td></tr>';
+}
+
+async function writePurchaseRecords(records, button, successMessage) {
+  if (!Array.isArray(records) || !records.length) return false;
+  if (!authenticationReady || !authToken) {
+    handleAuthenticationFailure("請先登入後再儲存紀錄。");
+    return false;
+  }
+
+  const originalText = button?.textContent || "確認入帳";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "儲存中...";
+  }
+
+  try {
+    await secureApiRequest({
+      action: "writePurchases",
+      records,
+    }, { timeoutMs: 180000 });
+
+    await loadData();
+    showNotice(successMessage || `已儲存 ${records.length} 筆紀錄。`);
+    return true;
+  } catch (error) {
+    if (authenticationReady) {
+      connectionState = "error";
+      setDataStatus("連線失敗", "error");
+      updateApiBadge();
+      showNotice("系統連線中，請稍候再試。", "error");
+    }
+    return false;
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
 }
 
 async function submitStagedRecords() {
   if (!stagedRecords.length) return;
-  if (!authenticationReady || !authToken) {
-    handleAuthenticationFailure("請先登入後再寫入資料。");
-    return;
-  }
 
-  const button = $("submitStaged");
-  const originalText = button.textContent;
-  button.disabled = true;
-  button.textContent = "安全寫入中…";
+  const records = [...stagedRecords];
+  const saved = await writePurchaseRecords(
+    records,
+    $("submitStaged"),
+    `已儲存 ${records.length} 筆批次紀錄。`
+  );
 
-  try {
-    const submittedCount = stagedRecords.length;
-    await secureApiRequest({
-      action: "writePurchases",
-      records: stagedRecords,
-    }, { timeoutMs: 60000 });
-
-    stagedRecords = [];
-    saveStagedRecords();
-    renderStagedRecords();
-    await loadData();
-    showNotice(`已安全寫入 ${submittedCount} 筆到私人 Google Sheet。`);
-  } catch (error) {
-    if (authenticationReady) showNotice(`寫入失敗：${error.message}`, "error");
-  } finally {
-    button.disabled = !stagedRecords.length;
-    button.textContent = originalText;
-  }
+  if (!saved) return;
+  stagedRecords = [];
+  saveStagedRecords();
+  renderStagedRecords();
 }
 
 function clearStagedRecords() {
   if (!stagedRecords.length) return;
-  const shouldClear = window.confirm(`確定清除待送清單中的 ${stagedRecords.length} 筆資料？`);
+  const shouldClear = window.confirm(`確定清除批次清單中的 ${stagedRecords.length} 筆資料？`);
   if (!shouldClear) return;
   stagedRecords = [];
   saveStagedRecords();
@@ -1766,7 +1905,13 @@ function downloadText(content, filename, type) {
 function populateDataLists() {
   fillDatalist("supplierOptions", uniqueSorted(purchases.map((purchase) => purchase.supplier)));
   fillDatalist("itemOptions", uniqueSorted(purchases.map((purchase) => purchase.name)));
-  fillDatalist("categoryOptions", uniqueSorted(purchases.map((purchase) => purchase.category)));
+
+  const customCategories = uniqueSorted(
+    purchases
+      .map((purchase) => purchase.category)
+      .filter((category) => category && !DEFAULT_CATEGORIES.includes(category))
+  );
+  fillDatalist("categoryOptions", [...DEFAULT_CATEGORIES, ...customCategories]);
 }
 
 function fillDatalist(id, values) {
@@ -1841,24 +1986,24 @@ function setDefaultEntryDate() {
 }
 
 function updateApiBadge() {
-  const configured = Boolean(APPS_SCRIPT_URL && APPS_SCRIPT_URL.includes("/exec"));
-  const connected = configured && authenticationReady && Boolean(authToken);
-  $("apiBadge").textContent = connected ? "私人 Google Sheet 已連接" : "登入後連接私人資料";
-  $("apiBadge").classList.toggle("connected", connected);
-  if ($("photoApiBadge")) {
-    $("photoApiBadge").textContent = connected ? "Gemini AI 安全連接" : "登入後啟用 AI 辨識";
-    $("photoApiBadge").classList.toggle("connected", connected);
-  }
+  const showError = authenticationReady && connectionState === "error";
+  [$("apiBadge"), $("photoApiBadge")].forEach((badge) => {
+    if (!badge) return;
+    badge.hidden = !showError;
+  });
 }
 
 function setDataStatus(text, type) {
-  $("dataStatus").textContent = text;
-  $("dataStatus").className = `statusDot ${type || ""}`.trim();
+  const status = $("dataStatus");
+  const retry = $("reloadData");
+  status.textContent = text;
+  status.className = `statusDot ${type || ""}`.trim();
+  retry.hidden = type !== "error";
 }
 
 function showLoading() {
-  $("foodCards").innerHTML = '<div class="empty">商品資料載入中…</div>';
-  $("recentList").innerHTML = '<div class="empty">採購資料載入中…</div>';
+  if ($("foodCards")) $("foodCards").innerHTML = '<div class="empty loadingText">載入中...</div>';
+  if ($("purchaseRows")) $("purchaseRows").innerHTML = '<tr><td colspan="11" class="empty loadingText">載入中...</td></tr>';
 }
 
 function showNotice(message, type = "") {

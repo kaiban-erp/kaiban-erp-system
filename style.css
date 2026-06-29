@@ -381,14 +381,77 @@ tbody tr:hover { background: rgba(238,243,233,.48); }
   font-size: 11px;
 }
 
-.foodCardImage {
+.fieldHint {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.foodCardMedia {
+  position: relative;
   width: 100%;
   height: 170px;
-  display: block;
   margin-bottom: 12px;
+  overflow: hidden;
   border-radius: 15px;
+  background: #f2ecdf;
+}
+
+.foodCardImage {
+  width: 100%;
+  height: 100%;
+  display: block;
   object-fit: cover;
   background: #f2ecdf;
+}
+
+.foodCardImagePlaceholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: var(--muted);
+  background: linear-gradient(145deg, #f8f2e8, #eee3d3);
+}
+
+.foodCardImagePlaceholder span {
+  font-size: 34px;
+}
+
+.foodCardMedia.hasImage .foodCardImagePlaceholder {
+  display: none;
+}
+
+.foodCardMedia.imageFailed .foodCardImage {
+  display: none;
+}
+
+.foodCardMedia.imageFailed .foodCardImagePlaceholder {
+  display: flex;
+}
+
+.tableImageCell {
+  width: 64px;
+  text-align: center;
+}
+
+.tableImageThumb {
+  width: 48px;
+  height: 48px;
+  display: inline-block;
+  border-radius: 10px;
+  object-fit: cover;
+  background: #f2ecdf;
+  vertical-align: middle;
+}
+
+.tableImageEmpty {
+  color: var(--muted);
 }
 
 @media (max-width: 680px) {
@@ -724,3 +787,348 @@ tbody tr:hover { background: rgba(238,243,233,.48); }
 }
 .loginPrivacy { margin: 18px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .logoutAction { color: #ffd9c0; }
+
+/* =====================================================
+   2026-06-29 任務式首頁與四大功能導覽
+   ===================================================== */
+
+.taskLauncher {
+  min-height: calc(100vh - 170px);
+  display: grid;
+  align-content: center;
+  gap: 28px;
+  padding: clamp(10px, 3vw, 34px) 0;
+}
+
+.taskLauncherIntro {
+  max-width: 760px;
+}
+
+.taskLauncherIntro h2 {
+  margin: 7px 0 8px;
+  font-size: clamp(28px, 4vw, 44px);
+  line-height: 1.15;
+}
+
+.taskLauncherIntro p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 16px;
+}
+
+.taskCardGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.taskCard {
+  min-height: 230px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto 1fr;
+  align-items: start;
+  gap: 22px;
+  padding: clamp(24px, 3vw, 36px);
+  border: 1px solid var(--line);
+  border-radius: 26px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+  text-align: left;
+  cursor: pointer;
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+
+.taskCard:hover,
+.taskCard:focus-visible {
+  transform: translateY(-4px);
+  border-color: rgba(82, 116, 91, .42);
+  box-shadow: 0 16px 36px rgba(36, 48, 38, .12);
+  outline: none;
+}
+
+.taskCardIcon {
+  grid-column: 1 / -1;
+  font-size: 46px;
+  line-height: 1;
+}
+
+.taskCardText {
+  align-self: end;
+}
+
+.taskCardText strong {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--deep);
+  font-size: clamp(24px, 2.4vw, 31px);
+}
+
+.taskCardText small {
+  display: block;
+  max-width: 260px;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.taskCardArrow {
+  align-self: end;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--green-soft);
+  color: var(--green-dark);
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.sectionTabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #f3ecdf;
+}
+
+.sectionTab {
+  min-height: 44px;
+  flex: 1 1 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.sectionTab:hover {
+  color: var(--green-dark);
+}
+
+.sectionTab.active {
+  background: #fff;
+  color: var(--green-dark);
+  box-shadow: 0 4px 14px rgba(36, 48, 38, .08);
+}
+
+.modulePanel {
+  display: none;
+}
+
+.modulePanel.active {
+  display: block;
+  animation: fadeIn .2s ease-out;
+}
+
+.quickGrid.single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.batchMode {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 253, 247, .72);
+  overflow: hidden;
+}
+
+.batchMode > summary {
+  padding: 16px 18px;
+  color: var(--green-dark);
+  cursor: pointer;
+  font-weight: 800;
+  list-style-position: inside;
+}
+
+.batchMode[open] > summary {
+  border-bottom: 1px solid var(--line);
+  background: var(--green-soft);
+}
+
+.batchModeContent {
+  padding: 14px;
+}
+
+.batchModeContent .panel:last-child {
+  margin-bottom: 0;
+}
+
+.sidebarConnection {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.retryAction {
+  width: auto;
+  justify-self: start;
+  padding: 5px 0;
+  color: #ffd3d3;
+  font-weight: 700;
+}
+
+.statusDot.loading::before {
+  background: transparent;
+  border: 2px solid rgba(255, 255, 255, .35);
+  border-top-color: #fff;
+  animation: statusSpin .8s linear infinite;
+}
+
+.loadingText::after {
+  content: "";
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-left: 8px;
+  border: 2px solid rgba(82, 116, 91, .25);
+  border-top-color: var(--green);
+  border-radius: 50%;
+  vertical-align: -2px;
+  animation: statusSpin .8s linear infinite;
+}
+
+.photoStatus.loading::before {
+  content: "";
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  margin-right: 7px;
+  border: 2px solid rgba(216, 121, 63, .25);
+  border-top-color: var(--orange);
+  border-radius: 50%;
+  vertical-align: -2px;
+  animation: statusSpin .8s linear infinite;
+}
+
+@keyframes statusSpin {
+  to { transform: rotate(360deg); }
+}
+
+.apiBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(255, 255, 255, .22);
+  border-radius: 14px;
+  background: rgba(179, 72, 72, .2);
+}
+
+.apiBadge[hidden] {
+  display: none !important;
+}
+
+.inlineRetry {
+  border: 1px solid rgba(255, 255, 255, .45);
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+@media (max-width: 1050px) {
+  .taskCardGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .taskCard {
+    min-height: 165px;
+    grid-template-columns: auto 1fr auto;
+    grid-template-rows: 1fr;
+    align-items: center;
+  }
+
+  .taskCardIcon {
+    grid-column: auto;
+    font-size: 38px;
+  }
+
+  .taskCardText {
+    align-self: center;
+  }
+
+  .taskCardArrow {
+    align-self: center;
+  }
+}
+
+@media (max-width: 900px) {
+  .navList {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .taskLauncher {
+    min-height: auto;
+  }
+}
+
+@media (max-width: 680px) {
+  .taskLauncher {
+    padding-top: 2px;
+  }
+
+  .taskCard {
+    min-height: 150px;
+    padding: 20px;
+    gap: 14px;
+  }
+
+  .taskCardIcon {
+    font-size: 32px;
+  }
+
+  .taskCardText strong {
+    font-size: 22px;
+  }
+
+  .taskCardArrow {
+    width: 36px;
+    height: 36px;
+  }
+
+  .sectionTabs {
+    position: sticky;
+    top: 0;
+    z-index: 8;
+  }
+}
+
+@media (max-width: 900px) {
+  .sidebarFoot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 12px;
+    padding-top: 10px;
+  }
+
+  .sidebarConnection {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+  }
+
+  .statusDot {
+    margin: 0;
+  }
+
+  .logoutAction {
+    width: auto;
+    padding: 6px 0;
+  }
+}
+
+@media (max-width: 680px) {
+  .navList {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
